@@ -12,13 +12,14 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
-from models.MonodepthModel import *
-from models.PWC_net import *
-from models.PWC_net import PWCDCNet
+# from models.MonodepthModel import *
+# from models.PWC_net import *
+# from models.PWC_net import PWCDCNet
+from models.tmp_pwc import *
 from utils.scene_dataloader import *
 from utils.utils import *
-from models.networks.submodules import *
-from networks.resample2d_package.resample2d import Resample2d
+# from models.networks.submodules import *
+# from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 import os
 
@@ -94,14 +95,10 @@ for epoch in range(args.num_epochs):
         
         image_loss = 0
         image_loss_2 = 0
-        for i in range(args.num_scale):
-            left_pyramid = []
-            right_pyramid = []
-            for j in range(len(former)):
-                left_pyramid.append(torch.nn.functional.interpolate(input=former[j], size=(args.img_height//(2**s), args.img_width//(2**s)), mode='bilinear', align_corners=False))
-                right_pyramid.append(torch.nn.functional.interpolate(input=latter[j], size=(args.img_height//(2**s), args.img_width//(2**s)), mode='bilinear', align_corners=False))
-            left_pyramid = torch.cat(left_pyramid, 0)
-            right_pyramid = torch.cat(right_pyramid, 0)
+        for i in range(args.num_scales):
+            left_pyramid = torch.nn.functional.interpolate(input=former, size=(args.input_height//(2**i), args.input_width//(2**i)), mode='bilinear', align_corners=False).cuda()
+            right_pyramid = torch.nn.functional.interpolate(input=latter, size=(args.input_height//(2**i), args.input_width//(2**i)), mode='bilinear', align_corners=False).cuda()
+           
             border_mask = create_border_mask(left_pyramid, 0.1)
             fw_mask, bw_mask, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask)
             fw_mask += 1e-3
@@ -121,7 +118,7 @@ for epoch in range(args.num_epochs):
             image_loss += image_loss_left
 
             #reconstruction from left to right
-            right_est = flow_warp(left_pyramid[i], disp_est_scale_2[i])
+            right_est = flow_warp(left_pyramid, disp_est_scale_2[i])
             l1_right = torch.abs(right_est - right_pyramid) * bw_mask
             l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask)
             ssim_right = SSIM(right_est * bw_mask, right_pyramid * bw_mask) 
