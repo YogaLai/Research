@@ -95,6 +95,10 @@ for epoch in range(args.num_epochs):
         
         image_loss = 0
         image_loss_2 = 0
+        disp_gradient_loss = 0
+        disp_gradient_loss_2 = 0
+        lr_loss = 0
+        warp2loss = 0
         for i in range(args.num_scales):
             left_pyramid = torch.nn.functional.interpolate(input=former, size=(args.input_height//(2**i), args.input_width//(2**i)), mode='bilinear', align_corners=False).cuda()
             right_pyramid = torch.nn.functional.interpolate(input=latter, size=(args.input_height//(2**i), args.input_width//(2**i)), mode='bilinear', align_corners=False).cuda()
@@ -117,6 +121,8 @@ for epoch in range(args.num_epochs):
             image_loss_left = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left  
             image_loss += image_loss_left
 
+            disp_gradient_loss += cal_grad2_error(disp_est_scale[i] / 20, left_pyramid, 1.0) 
+
             #reconstruction from left to right
             right_est = flow_warp(left_pyramid, disp_est_scale_2[i])
             l1_right = torch.abs(right_est - right_pyramid) * bw_mask
@@ -126,6 +132,30 @@ for epoch in range(args.num_epochs):
             image_loss_right  = args.alpha_image_loss * ssim_loss_right + (1 - args.alpha_image_loss) * l1_reconstruction_loss_right 
             image_loss_2 += image_loss_right
             
+            disp_gradient_loss_2 = cal_grad2_error(disp_est_scale_2[i] / 20, right_pyramid, 1.0)
+
+            #LR consistency
+            right_to_left_disp = -flow_warp(disp_est_2[i], disp_est_scale[i]) 
+            left_to_right_disp = -flow_warp(disp_est[i], disp_est_scale_2[i])
+            # select stereo index
+            idx_list = range(args.batch_size*4)
+            select_list = []
+            select_list.append(idx_list[:args.batch_size])
+            select_list.append(idx_list[-args.batch_size:])
+            lr_left_loss  = torch.mean(torch.abs(right_to_left_disp[i][select_list] - disp_est[i][select_list])) 
+            lr_right_loss = torch.mean(torch.abs(left_to_right_disp[i][select_list] - disp_est_2[i][select_list]))
+            lr_loss += sum(lr_left_loss + lr_right_loss)
+            
+            if args.type_of_2warp == 1:
+                mask_4 = fw_mask[args.batch_size:args.batch_size*2] 
+                warp2_est_4 = flow_warp(left_est[:args.batch_size], disp_est_scale[i][args.batch_size:args.batch_size*2])
+                warp2loss += 0.1 * sum(warp_2(warp2_est_4, left_pyramid[3*args.batch_size:4*args.batch_size], mask_4, args))
+                mask_5 = bw_mask[args.batch_size:args.batch_size*2] 
+                warp2_est_5 = flow_warp(left_est[3*args.batch_size:4*args.batch_size], disp_est_scale_2[i][args.batch_size:2*args.batch_size]) 
+                warp2loss += 0.1 * sum(warp_2(warp2_est_5, left_pyramid[:args.batch_size], mask_5, args))
+            
+        loss = image_loss + image_loss_2 + 10 * (disp_gradient_loss + disp_gradient_loss_2) + args.lr_loss_weight * lr_loss + warp2loss
+        loss.backward()
 
 
         border_mask = [create_border_mask(left_pyramid[i], 0.1) for i in range(4)]
