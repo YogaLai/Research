@@ -12,6 +12,7 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
+import os
 
 def get_kitti_cycle_data(file_path_train, path):
     f_train = open(file_path_train)
@@ -129,11 +130,12 @@ class myCycleImageFolder(data.Dataset):
         return len(self.left1)
     
 class myImageFolder(data.Dataset):
-    def __init__(self, left, right, flow, param):
+    def __init__(self, left, right, flow, param, disp_gt=None):
         self.right = right
         self.left = left
         self.flow = flow
         self.param = param
+        self.disp_gt = disp_gt
         
     def __getitem__(self, index):
         left = self.left[index]
@@ -162,7 +164,30 @@ class myImageFolder(data.Dataset):
 
             return left_image, right_image, f.type(torch.FloatTensor), mask, h, w
         
+        if self.disp_gt is not None:
+            disp_gt = self.disp_gt[index]
+            disp_gt = Image.open(disp_gt)
+            w, h = disp_gt.size
+            # disp_gt = disp_gt.resize([1232, 368])
+            disp_gt = disp_gt.crop((w-1232, h-368, w, h))
+            disp_gt = np.ascontiguousarray(disp_gt,dtype=np.float32)/256
+
+            return left_image, right_image, disp_gt
+
         return left_image, right_image
     
     def __len__(self):
-        return len(self.left)
+        return len(self.left)    
+
+def get_kitti_2015(dataset_path):
+    left_image = []
+    right_image = []
+    gt = []
+    total_num = len(os.listdir(os.path.join(dataset_path, "RGB_left")))//2
+    
+    for i in range(total_num):
+        left_image.append(os.path.join(dataset_path, "RGB_left", str(i).zfill(6) + "_10.png"))
+        right_image.append(os.path.join(dataset_path, "RGB_right", str(i).zfill(6) + "_10.png"))
+        gt.append(os.path.join(dataset_path, "disp_occ_0", str(i).zfill(6) + "_10.png"))
+    
+    return left_image, right_image, gt

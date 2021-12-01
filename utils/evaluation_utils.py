@@ -35,7 +35,7 @@ width_to_focal[1238] = 718.3351
 def load_gt_disp_kitti(path):
     gt_disparities = []
     for i in range(200):
-        disp = cv2.imread(path + "/training/disp_occ_0/" + str(i).zfill(6) + "_10.png", -1)
+        disp = cv2.imread(path + "/disp_occ_0/" + str(i).zfill(6) + "_10.png", -1)
         disp = disp.astype(np.float32) / 256
         gt_disparities.append(disp)
     return gt_disparities
