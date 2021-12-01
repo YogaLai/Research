@@ -44,7 +44,7 @@ net.load_state_dict(checkpoint['state_dict'])
 left_image_test, right_image_test = get_data(args.filenames_file, args.data_path)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
-         batch_size = 1, shuffle = False, num_workers = 1, drop_last =False)
+         batch_size = 1, shuffle = False, drop_last =False)
 
 if args.split == 'kitti':
     disparities = np.zeros((200, args.input_height, args.input_width), dtype=np.float32)
