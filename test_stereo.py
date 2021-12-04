@@ -13,8 +13,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-from models.PWC_net import *
-from models.PWC_net import PWCDCNet
+from models.PWC_net_my_correlation import *
+# from models.PWC_net import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
 
@@ -28,6 +28,7 @@ def get_args():
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
     parser.add_argument('--input_width',               type=int,   help='input width', default=512)
     parser.add_argument('--checkpoint_path',           type=str,   help='path to a specific checkpoint to load', required=True)
+    parser.add_argument('--use_cuda',                   type=bool,   help='use gpu', default=True)
     args = parser.parse_args()
     return args
 
@@ -35,10 +36,12 @@ args = get_args()
 
 checkpoint = torch.load(args.checkpoint_path)
 if args.model_name == 'monodepth':
-    net = MonodepthNet().cuda()
+    net = MonodepthNet()
 elif args.model_name == 'pwc':
-    net = pwc_dc_net().cuda()
-    args.input_width = 832
+    net = pwc_dc_net()
+    args.input_width = 832    
+if args.use_cuda:
+    net = net.cuda()
 net.load_state_dict(checkpoint['state_dict'])
 
 left_image_test, right_image_test = get_data(args.filenames_file, args.data_path)
@@ -58,7 +61,9 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
     
     left_pyramid = make_pyramid(left_batch, 4)
     
-    model_input = Variable(torch.cat((left_batch, right_batch), 1).cuda())
+    model_input = Variable(torch.cat((left_batch, right_batch), 1))
+    if args.use_cuda:
+        model_input = model_input.cuda()
     if args.model_name == 'monodepth':
         disp_est_scale, disp_est= net(model_input)
     elif args.model_name == 'pwc':
@@ -67,4 +72,4 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
     
     disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
 print('done')
-np.save('./disparities.npy', disparities)
+np.save('./disparities_my_corr.npy', disparities)
