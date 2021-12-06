@@ -53,20 +53,26 @@ def get_flow_data(file_path_test, path):
         
     return former_image_test, latter_image_test, flow_test
 
-def get_transform(param):
-    return transforms.Compose([
-        transforms.Resize([param.input_height, param.input_width]),
-        transforms.ToTensor()
-    ])
+def get_transform(param, resize):
+    if resize:
+        return transforms.Compose([
+            transforms.Resize([param.input_height, param.input_width]),
+            transforms.ToTensor()
+        ])
+    else:
+        return transforms.Compose([
+            transforms.ToTensor()
+        ])
     
 class myCycleImageFolder(data.Dataset):
-    def __init__(self, left1, left2, right1, right2, training, param):
+    def __init__(self, left1, left2, right1, right2, training, param, resize=True):
         self.right1 = right1
         self.left1 = left1
         self.right2 = right2
         self.left2 = left2
         self.training = training
         self.param = param
+        self.resize = resize
         
     def __getitem__(self, index):
         left1 = self.left1[index]
@@ -119,7 +125,7 @@ class myCycleImageFolder(data.Dataset):
                 
         
         #transforms
-        process = get_transform(param)
+        process = get_transform(param, self.resize)
         left_image_1 = process(left_image_1)
         right_image_1 = process(right_image_1)
         left_image_2 = process(left_image_2)
@@ -130,12 +136,13 @@ class myCycleImageFolder(data.Dataset):
         return len(self.left1)
     
 class myImageFolder(data.Dataset):
-    def __init__(self, left, right, flow, param, disp_gt=None):
+    def __init__(self, left, right, flow, param, disp_gt=None, resize=True):
         self.right = right
         self.left = left
         self.flow = flow
         self.param = param
         self.disp_gt = disp_gt
+        self.resize = resize
         
     def __getitem__(self, index):
         left = self.left[index]
@@ -144,7 +151,7 @@ class myImageFolder(data.Dataset):
         left_image = Image.open(left).convert('RGB')
         right_image = Image.open(right).convert('RGB')
       
-        process = get_transform(param)
+        process = get_transform(param, self.resize)
         left_image = process(left_image)
         right_image = process(right_image)
         
