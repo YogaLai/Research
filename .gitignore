@@ -3,3 +3,4 @@ savemodel/
 __pycache__/
 .vscode/
 visualization/
+*.npy

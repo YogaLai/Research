@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 import argparse
 from evaluation_utils import *
+from PIL import Image
+import matplotlib.pyplot as plt
+import os
 
 parser = argparse.ArgumentParser(description='Evaluation on the KITTI dataset')
 parser.add_argument('--split',               type=str,   help='data split, kitti or eigen',         default='kitti')
@@ -11,6 +14,7 @@ parser.add_argument('--min_depth',           type=float, help='minimum depth for
 parser.add_argument('--max_depth',           type=float, help='maximum depth for evaluation',        default=80)
 parser.add_argument('--eigen_crop',                      help='if set, crops according to Eigen NIPS14',   action='store_true')
 parser.add_argument('--garg_crop',                       help='if set, crops according to Garg  ECCV16',   action='store_true')
+parser.add_argument('--exp_name',            type=str,   help='evaluate png path')
 
 args = parser.parse_args()
 
@@ -18,11 +22,21 @@ if __name__ == '__main__':
 
     pred_disparities = np.load(args.predicted_disp_path)
 
+    if not os.path.isdir(f"visualization/evaluate/{args.exp_name}"):
+        os.makedirs(f"visualization/evaluate/{args.exp_name}")
+
     if args.split == 'kitti':
         num_samples = 200
         
         gt_disparities = load_gt_disp_kitti(args.gt_path)
         gt_depths, pred_depths, pred_disparities_resized = convert_disps_to_depths_kitti(gt_disparities, pred_disparities)
+        for idx, plt_disp in enumerate(pred_disparities):
+            # plt_disp = plt_disp.cpu().data.numpy()
+            plt_disp = (plt_disp*256).astype('uint16')
+            plt_disp = Image.fromarray(plt_disp)
+            if idx % 10 == 0:
+                plt_disp.save(f"visualization/evaluate/{args.exp_name}/{idx}.png")
+                plt.imsave(f"visualization/evaluate/{args.exp_name}/plt_{idx}.png", plt_disp, cmap='jet')
 
     elif args.split == 'eigen':
         num_samples = 697
