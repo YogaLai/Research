@@ -110,15 +110,29 @@ for epoch in range(start_epoch, args.num_epochs):
             fw_mask = []
             bw_mask = []
             for i in range(4):
-                fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
-                fw += 1e-3
-                bw += 1e-3
-                fw[[0,1,6,7]] = fw[[0,1,6,7]] * 0 + 1
-                bw[[0,1,6,7]] = bw[[0,1,6,7]] * 0 + 1
+                # fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
+                # fw += 1e-3
+                # bw += 1e-3
+                # fw[[0,1,6,7]] = fw[[0,1,6,7]] * 0 + 1
+                # bw[[0,1,6,7]] = bw[[0,1,6,7]] * 0 + 1
+                fw = get_soft_mask(disp_est_scale_2[i])
+                bw = get_soft_mask(disp_est_scale[i])
                 fw_detached = fw.clone().detach()
                 bw_detached = bw.clone().detach()
                 fw_mask.append(fw_detached)
                 bw_mask.append(bw_detached)
+                # disp_est_scale_2[i][[0,1,6,7]] = -disp_est_scale_2[i][[0,1,6,7]]
+                # disp_est_scale[i][[0,1,6,7]] = -disp_est_scale[i][[0,1,6,7]]
+                # disp_est_scale_2[i][[0,1,6,7]] = -disp_est_scale_2[i][[0,1,6,7]]
+                # disp_est_scale[i][[0,1,6,7]] = -disp_est_scale[i][[0,1,6,7]]
+            
+
+            # fw_mask = fw_mask[0][6,0].cpu().data.numpy()
+            # img = Image.fromarray(fw_mask)
+            # plt.imsave('visualization/fw_mask.png', img, cmap='gray')
+            # bw_mask = bw_mask[0][6,0].cpu().data.numpy()
+            # img = Image.fromarray(bw_mask)
+            # plt.imsave('visualization/bw_mask.png', img, cmap='gray')
             
             #reconstruction from right to left
             left_est = [Resample2d()(right_pyramid[i], disp_est_scale[i]) for i in range(4)]
@@ -182,10 +196,12 @@ for epoch in range(start_epoch, args.num_epochs):
             elif args.type_of_2warp == 2:
                 mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
                 warp2_est = [Resample2d()(left_est[i][[2,3]], disp_est_scale_2[i][[6,7]]) for i in range(4)]
-                loss += 0.1 * sum([warp_2(warp2_est[i], right_pyramid[i][[6,7]], mask[i], args) for i in range(4)])
+                warp2loss = sum([warp_2(warp2_est[i], right_pyramid[i][[6,7]], mask[i], args) for i in range(4)])
+                loss += 0.1 * warp2loss
                 mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
                 warp2_est_3 = [Resample2d()(left_est[i][[4,5]], disp_est_scale[i][[6,7]]) for i in range(4)]
-                loss += 0.1 * sum([warp_2(warp2_est_3[i], left_pyramid[i][[6,7]], mask_3[i], args) for i in range(4)])
+                warp2loss_2 = sum([warp_2(warp2_est_3[i], left_pyramid[i][[6,7]], mask_3[i], args) for i in range(4)])
+                loss += 0.1 * warp2loss_2
                 
             elif args.type_of_2warp == 3:
                 mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
@@ -196,6 +212,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 loss += 0.1 * sum([warp_2(warp2_est_2[i], right_pyramid[i][[6,7]], mask_2[i], args) for i in range(4)])
                 
             loss.backward()
+            optimizer.step()
             
             if args.model_name == 'monodepth':
                 print("Epoch :", epoch)
@@ -211,18 +228,24 @@ for epoch in range(start_epoch, args.num_epochs):
             writer.add_scalar('Train_iter/smooth_loss', disp_gradient_loss.data, iter)
             writer.add_scalar('Train_iter/smooth_loss_2', disp_gradient_loss_2.data, iter)
             writer.add_scalar('Train_iter/lr_consistency', lr_loss.data, iter)
-            iter += 1
-            optimizer.step()
+            writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
+            writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
+           
+            if iter % 200 == 0:
+                writer.add_images('fw_mask', fw_mask[0], iter)
+                writer.add_images('bw_mask', bw_mask[0], iter)
 
+            if (iter+1) % 1500 == 0:
+                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+                torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
+                print("The model of iter ", iter, "has been saved.")
+            
+            iter += 1
             pbar.set_description(
                 f"loss: {loss.item():.5f}"
             )
             pbar.update(left_image_1.size(0))
 
-            if (iter+1) % 1500 == 0:
-                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-                torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(iter))
-                print("The model of iter ", iter, "has been saved.")
 
     # if epoch % 1 == 0:
     state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}

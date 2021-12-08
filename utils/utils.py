@@ -203,3 +203,72 @@ def flow_warp(tenInput, tenFlow):
     backwarp_tenGrid = torch.cat([ tenHor, tenVer ], 1).cuda()
     tenFlow = torch.cat([ tenFlow[:, 0:1, :, :] / ((tenInput.shape[3] - 1.0) / 2.0), tenFlow[:, 1:2, :, :] / ((tenInput.shape[2] - 1.0) / 2.0) ], 1)
     return torch.nn.functional.grid_sample(input=tenInput, grid=(backwarp_tenGrid + tenFlow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='border', align_corners=False)
+
+def repeat(x, n_repeats):
+    x = x.type(torch.int32)
+    rep = torch.ones((1, n_repeats)).type(torch.int32)
+    x = x.reshape(-1,1)@rep
+    return x.reshape(-1)
+
+def forward_warp(im0, flow):
+    zero = torch.zeros([]).cuda()
+    B,C,H,W = im0.shape
+    xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
+    yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+    xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    grid = torch.cat((xx, yy), 1).float().cuda()
+    grid = grid + flow
+   
+    x0 = torch.floor(grid[:,0:1,:,:])
+    x1 = x0 + 1
+    y0 = torch.floor(grid[:,1:,:,:])
+    y1 = y0 + 1
+
+    base = repeat(torch.arange(B)*W*H, W*H).cuda()
+    base_y0 = base + torch.clamp(y0.reshape(-1), 0, H-1) * W
+    base_y1 = base + torch.clamp(y1.reshape(-1), 0, H-1) * W
+    idx_a = (base_y0 + torch.clamp(x0.reshape(-1), 0, W-1)).type(torch.int64)
+    idx_b = (base_y1 + torch.clamp(x0.reshape(-1), 0, W-1)).type(torch.int64)
+    idx_c = (base_y0 + torch.clamp(x1.reshape(-1), 0, W-1)).type(torch.int64)
+    idx_d = (base_y1 + torch.clamp(x1.reshape(-1), 0, W-1)).type(torch.int64)
+
+    wa = ((x1-grid[:,0:1,:,:]) * (y1-grid[:,1:,:,:]))
+    wb = ((x1-grid[:,0:1,:,:]) * (grid[:,1:,:,:]-y0))
+    wc = ((grid[:,0:1,:,:]-x0) * (y1-grid[:,1:,:,:]))
+    wd = ((grid[:,0:1,:,:]-x0) * (grid[:,1:,:,:]-y0))
+
+    """ valid range not done"""
+    cond_x0 = torch.logical_and(x0>=0, x0<W)
+    cond_x1 = torch.logical_and(x1>=0, x1<W)
+    cond_y0 = torch.logical_and(y0>=0, y0<H)
+    cond_y1 = torch.logical_and(y1>=0, y1<H)
+    wa = torch.where(torch.logical_and(cond_x0, cond_y0), wa, zero).reshape(-1,1)
+    wb = torch.where(torch.logical_and(cond_x0, cond_y1), wb, zero).reshape(-1,1)
+    wc = torch.where(torch.logical_and(cond_x1, cond_y0), wc, zero).reshape(-1,1)
+    wd = torch.where(torch.logical_and(cond_x1, cond_y1), wd, zero).reshape(-1,1)
+
+    im0 = im0.reshape(-1, C)
+    im1 = torch.zeros_like(im0)
+    im1 = im1.scatter_add(0, idx_a.reshape(-1,1), wa*im0)
+    im1 = im1.scatter_add(0, idx_b.reshape(-1,1), wb*im0)
+    im1 = im1.scatter_add(0, idx_c.reshape(-1,1), wc*im0)
+    im1 = im1.scatter_add(0, idx_d.reshape(-1,1), wd*im0)
+
+    im1 = im1.reshape(B,C,H,W)
+    return im1
+
+def get_soft_mask(backward_flow, eps=1e-3):
+    one = torch.ones([backward_flow.size(0), 1, backward_flow.size(2), backward_flow.size(3)]).to(backward_flow.device)
+    disp = torch.cat([-backward_flow[[0,1]], backward_flow[[2,3,4,5]], -backward_flow[[6,7]]])
+    mask = forward_warp(one, disp)
+    mask += eps
+    mask = torch.clamp(mask, 0, 1)
+    return mask
+
+def generate_flow_left(self, disp):
+    b, _, h, w = disp.shape
+    zero = torch.zero([b, 1, h, w]).to(disp.device)
+    ltr_flow = -disp * w
+    # ltr_flow = tf.concat([ltr_flow, zero_flow], axis=3)
+    return ltr_flow
