@@ -132,8 +132,10 @@ def get_mask(forward, backward, border_mask):
     flow_diff_fw = flow_fw + flow_bw_warped
     flow_diff_bw = flow_bw + flow_fw_warped
     occ_thresh =  0.01 * mag_sq + 0.5
-    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).type(torch.cuda.FloatTensor)
-    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).type(torch.cuda.FloatTensor)
+    # fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).type(torch.cuda.FloatTensor)
+    # fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).type(torch.cuda.FloatTensor)
+    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
+    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
     
     if border_mask is None:
         mask_fw = create_outgoing_mask(flow_fw)
@@ -141,6 +143,8 @@ def get_mask(forward, backward, border_mask):
     else:
         mask_fw = border_mask
         mask_bw = border_mask
+    # print(mask_fw.device)
+    # print(fb_occ_bw.device)
     fw = mask_fw * (1 - fb_occ_fw)
     bw = mask_bw * (1 - fb_occ_bw)
 
@@ -211,13 +215,13 @@ def repeat(x, n_repeats):
     return x.reshape(-1)
 
 def forward_warp(im0, flow):
-    zero = torch.zeros([]).cuda()
+    zero = torch.zeros([]).to(flow.device)
     B,C,H,W = im0.shape
     xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
     yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
     xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
     yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
-    grid = torch.cat((xx, yy), 1).float().cuda()
+    grid = torch.cat((xx, yy), 1).float().to(flow.device)
     grid = grid + flow
    
     x0 = torch.floor(grid[:,0:1,:,:])
@@ -225,7 +229,7 @@ def forward_warp(im0, flow):
     y0 = torch.floor(grid[:,1:,:,:])
     y1 = y0 + 1
 
-    base = repeat(torch.arange(B)*W*H, W*H).cuda()
+    base = repeat(torch.arange(B)*W*H, W*H).to(flow.device)
     base_y0 = base + torch.clamp(y0.reshape(-1), 0, H-1) * W
     base_y1 = base + torch.clamp(y1.reshape(-1), 0, H-1) * W
     idx_a = (base_y0 + torch.clamp(x0.reshape(-1), 0, W-1)).type(torch.int64)
