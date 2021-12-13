@@ -28,14 +28,14 @@ def get_args():
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
     parser.add_argument('--input_width',               type=int,   help='input width', default=512)
     parser.add_argument('--checkpoint_path',           type=str,   help='path to a specific checkpoint to load', required=True)
-    parser.add_argument('--use_cuda',                  help='use gpu', action='store_true')
+    parser.add_argument('--cuda',                  help='use gpu', action='store_true')
     args = parser.parse_args()
     return args
 
 args = get_args()
 
 torch.manual_seed(1)
-if args.use_cuda:
+if args.cuda:
     torch.cuda.manual_seed(1)
 
 checkpoint = torch.load(args.checkpoint_path)
@@ -49,7 +49,7 @@ elif args.model_name == 'realtime_stereo':
     net = nn.DataParallel(net)
     args.input_width = 832
    
-if args.use_cuda:
+if args.cuda:
     net = net.cuda()
 net.load_state_dict(checkpoint['state_dict'])
 net.eval()
@@ -71,7 +71,7 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
                             'std': [0.229, 0.224, 0.225]}
         normalize = transforms.Normalize(**normal_mean_var)
         left, right = normalize(left[0]).unsqueeze(0), normalize(right[0]).unsqueeze(0)
-        if args.use_cuda:
+        if args.cuda:
             left, right = left.cuda(), right.cuda()
         disp_est = net(left, right)[0] / 832
         disparities[batch_idx] = disp_est.data.cpu().numpy()
@@ -83,7 +83,7 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
     left_pyramid = make_pyramid(left_batch, 4)
     
     model_input = Variable(torch.cat((left_batch, right_batch), 1))
-    if args.use_cuda:
+    if args.cuda:
         model_input = model_input.cuda()
 
     if args.model_name == 'monodepth':
