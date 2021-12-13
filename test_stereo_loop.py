@@ -29,6 +29,8 @@ def get_args():
     parser.add_argument('--input_width',               type=int,   help='input width', default=512)
     parser.add_argument('--checkpoint_path',           type=str,   help='path to a specific checkpoint to load', required=True)
     parser.add_argument('--cuda',                  help='use gpu', action='store_true')
+    parser.add_argument('--epoch_thres',               type=int,   help='use gpu', default=0)
+    parser.add_argument('--exp_name',                  type=str,   help='experiment name',required=True)
     args = parser.parse_args()
     return args
 
@@ -60,7 +62,7 @@ ckt_dict = {}
 for ckt_name in os.listdir(args.checkpoint_path):
     if 'model_epoch' in ckt_name:
         epoch = int(ckt_name[11:])
-        if epoch < 5:
+        if epoch < args._epoch_thres:
             continue
         ckt_dict[epoch] = os.path.join(args.checkpoint_path, ckt_name)
 
@@ -110,4 +112,4 @@ for epoch, ckt in ckt_dict:
 
         disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
     print('done')
-    np.save(f'./out_npy/disparities_soft_mask_{epoch}.npy', disparities)
+    np.save(f'./out_npy/disparities_{args.exp_name}_{epoch}.npy', disparities)
