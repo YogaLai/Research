@@ -23,6 +23,7 @@ from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
+from Forward_Warp import forward_warp
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -109,18 +110,29 @@ for epoch in range(start_epoch, args.num_epochs):
             
             fw_mask = []
             bw_mask = []
+            foward_warp_mod = forward_warp()
             for i in range(4):
-                # fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
-                # fw += 1e-3
-                # bw += 1e-3
+                # disp_est_scale[i][:,1] = 0
+                # disp_est_scale_2[i][:,1] = 0
+                fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i][[2,3,4,5]], disp_est_scale_2[i][[2,3,4,5]], border_mask[i][:4,:,:,:])
+                fw += 1e-3
+                bw += 1e-3
                 # fw[[0,1,6,7]] = fw[[0,1,6,7]] * 0 + 1
                 # bw[[0,1,6,7]] = bw[[0,1,6,7]] * 0 + 1
-                fw = get_soft_mask(disp_est_scale_2[i])
-                bw = get_soft_mask(disp_est_scale[i])
+                fw2 = get_soft_mask(disp_est_scale_2[i][[0,1,6,7]], foward_warp_mod)
+                bw2 = get_soft_mask(disp_est_scale[i][[0,1,6,7]], foward_warp_mod)
                 fw_detached = fw.clone().detach()
                 bw_detached = bw.clone().detach()
-                fw_mask.append(fw_detached)
-                bw_mask.append(bw_detached)
+                fw2_detached = fw2.clone().detach()
+                bw2_detached = bw2.clone().detach()
+                fw_mix = torch.cat((fw2_detached[[0,1]], fw_detached, fw2_detached[[2,3]]))
+                bw_mix = torch.cat((bw2_detached[[0,1]], bw_detached, bw2_detached[[2,3]]))
+                # bw_mix = torch.cat(fw2_detached[[0,1]], fw2_detached[[2,3,4,5]], fw_detached[[6,7]])
+                fw_mask.append(fw_mix)
+                bw_mask.append(bw_mix)
+                # fw_mask.append(fw_detached)
+                # bw_mask.append(bw_detached)
+
                 # disp_est_scale_2[i][[0,1,6,7]] = -disp_est_scale_2[i][[0,1,6,7]]
                 # disp_est_scale[i][[0,1,6,7]] = -disp_est_scale[i][[0,1,6,7]]
                 # disp_est_scale_2[i][[0,1,6,7]] = -disp_est_scale_2[i][[0,1,6,7]]
@@ -234,6 +246,8 @@ for epoch in range(start_epoch, args.num_epochs):
             if iter % 200 == 0:
                 writer.add_images('fw_mask', fw_mask[0], iter)
                 writer.add_images('bw_mask', bw_mask[0], iter)
+                writer.add_images('left_rgb', left_image_1, iter)
+                writer.add_images('right_rgb', right_image_1, iter)
 
             if (iter+1) % 1500 == 0:
                 state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
