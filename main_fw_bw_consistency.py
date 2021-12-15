@@ -185,10 +185,12 @@ for epoch in range(start_epoch, args.num_epochs):
             if args.type_of_2warp == 1:
                 mask_4 = [fw_mask[i][[2,3]] for i in range(4)]
                 warp2_est_4 = [Resample2d()(left_est[i][[0,1]], disp_est_scale[i][[2,3]]) for i in range(4)]
-                loss += 0.1 * sum([warp_2(warp2_est_4[i], left_pyramid[i][[6,7]], mask_4[i], args) for i in range(4)])
+                warp2loss = sum([warp_2(warp2_est_4[i], left_pyramid[i][[6,7]], mask_4[i], args) for i in range(4)])
+                loss += 0.1 * warp2loss
                 mask_5 = [bw_mask[i][[2,3]] for i in range(4)]
                 warp2_est_5 = [Resample2d()(left_est[i][[6,7]], disp_est_scale_2[i][[2,3]]) for i in range(4)]
-                loss += 0.1 * sum([warp_2(warp2_est_5[i], left_pyramid[i][[0,1]], mask_5[i], args) for i in range(4)])
+                warp2loss_2 = sum([warp_2(warp2_est_5[i], left_pyramid[i][[0,1]], mask_5[i], args) for i in range(4)])
+                loss += 0.1 * warp2loss_2
                 
             elif args.type_of_2warp == 2:
                 mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
@@ -243,7 +245,6 @@ for epoch in range(start_epoch, args.num_epochs):
                 f"loss: {loss.item():.5f}"
             )
             pbar.update(left_image_1.size(0))
-            break
 
     scheduler.step()
 

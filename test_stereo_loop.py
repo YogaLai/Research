@@ -62,7 +62,7 @@ ckt_dict = {}
 for ckt_name in os.listdir(args.checkpoint_path):
     if 'model_epoch' in ckt_name:
         epoch = int(ckt_name[11:])
-        if epoch < args._epoch_thres:
+        if epoch < args.epoch_thres:
             continue
         ckt_dict[epoch] = os.path.join(args.checkpoint_path, ckt_name)
 
