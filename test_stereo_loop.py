@@ -16,7 +16,7 @@ from models.MonodepthModel import *
 from models.PWC_net_my_correlation import *
 from utils.scene_dataloader import *
 from utils.utils import *
-from models.RT_stereov4 import HRstereoNet
+# from models.RT_stereov4 import HRstereoNet
 
 def get_args():
     parser = argparse.ArgumentParser()

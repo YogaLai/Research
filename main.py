@@ -13,9 +13,9 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-# from models.PWC_net import *
-# from models.PWC_net import PWCDCNet
-from models.PWC_net_my_correlation import *
+from models.PWC_net import *
+from models.PWC_net import PWCDCNet
+# from models.PWC_net_my_correlation import *
 from utils.scene_dataloader import *
 from utils.utils import *
 from models.networks.submodules import *
@@ -23,7 +23,7 @@ from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
-from Forward_Warp import forward_warp
+from Forward_Warp.forward_warp import forward_warp
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -114,24 +114,24 @@ for epoch in range(start_epoch, args.num_epochs):
             for i in range(4):
                 # disp_est_scale[i][:,1] = 0
                 # disp_est_scale_2[i][:,1] = 0
-                fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i][[2,3,4,5]], disp_est_scale_2[i][[2,3,4,5]], border_mask[i][:4,:,:,:])
-                fw += 1e-3
-                bw += 1e-3
+                # fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i][[2,3,4,5]], disp_est_scale_2[i][[2,3,4,5]], border_mask[i][:4,:,:,:])
+                # fw += 1e-3
+                # bw += 1e-3
                 # fw[[0,1,6,7]] = fw[[0,1,6,7]] * 0 + 1
                 # bw[[0,1,6,7]] = bw[[0,1,6,7]] * 0 + 1
-                fw2 = get_soft_mask(disp_est_scale_2[i][[0,1,6,7]], foward_warp_mod)
-                bw2 = get_soft_mask(disp_est_scale[i][[0,1,6,7]], foward_warp_mod)
+                fw = get_soft_mask(disp_est_scale_2[i], foward_warp_mod)
+                bw = get_soft_mask(disp_est_scale[i], foward_warp_mod, neg_disp=True)
                 fw_detached = fw.clone().detach()
                 bw_detached = bw.clone().detach()
-                fw2_detached = fw2.clone().detach()
-                bw2_detached = bw2.clone().detach()
-                fw_mix = torch.cat((fw2_detached[[0,1]], fw_detached, fw2_detached[[2,3]]))
-                bw_mix = torch.cat((bw2_detached[[0,1]], bw_detached, bw2_detached[[2,3]]))
+                # fw2_detached = fw2.clone().detach()
+                # bw2_detached = bw2.clone().detach()
+                # fw_mix = torch.cat((fw2_detached[[0,1]], fw_detached, fw2_detached[[2,3]]))
+                # bw_mix = torch.cat((bw2_detached[[0,1]], bw_detached, bw2_detached[[2,3]]))
                 # bw_mix = torch.cat(fw2_detached[[0,1]], fw2_detached[[2,3,4,5]], fw_detached[[6,7]])
-                fw_mask.append(fw_mix)
-                bw_mask.append(bw_mix)
-                # fw_mask.append(fw_detached)
-                # bw_mask.append(bw_detached)
+                # fw_mask.append(fw_mix)
+                # bw_mask.append(bw_mix)
+                fw_mask.append(fw_detached)
+                bw_mask.append(bw_detached)
 
                 # disp_est_scale_2[i][[0,1,6,7]] = -disp_est_scale_2[i][[0,1,6,7]]
                 # disp_est_scale[i][[0,1,6,7]] = -disp_est_scale[i][[0,1,6,7]]
@@ -240,8 +240,9 @@ for epoch in range(start_epoch, args.num_epochs):
             writer.add_scalar('Train_iter/smooth_loss', disp_gradient_loss.data, iter)
             writer.add_scalar('Train_iter/smooth_loss_2', disp_gradient_loss_2.data, iter)
             writer.add_scalar('Train_iter/lr_consistency', lr_loss.data, iter)
-            writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
-            writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
+            if args.type_of_2warp > 0:
+                writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
+                writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
            
             if iter % 200 == 0:
                 writer.add_images('fw_mask', fw_mask[0], iter)
