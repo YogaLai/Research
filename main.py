@@ -208,11 +208,11 @@ for epoch in range(start_epoch, args.num_epochs):
             elif args.type_of_2warp == 2:
                 mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
                 warp2_est = [Resample2d()(left_est[i][[2,3]], disp_est_scale_2[i][[6,7]]) for i in range(4)]
-                warp2loss = sum([warp_2(warp2_est[i], right_pyramid[i][[6,7]], mask[i], args) for i in range(4)])
+                warp2loss = sum([warp_2(warp2_est[i], right_est[i][[6,7]], mask[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss
                 mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
                 warp2_est_3 = [Resample2d()(left_est[i][[4,5]], disp_est_scale[i][[6,7]]) for i in range(4)]
-                warp2loss_2 = sum([warp_2(warp2_est_3[i], left_pyramid[i][[6,7]], mask_3[i], args) for i in range(4)])
+                warp2loss_2 = sum([warp_2(warp2_est_3[i], left_est[i][[6,7]], mask_3[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss_2
                 
             elif args.type_of_2warp == 3:
