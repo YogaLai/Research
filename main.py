@@ -18,7 +18,6 @@ from models.PWC_net import PWCDCNet
 # from models.PWC_net_my_correlation import *
 from utils.scene_dataloader import *
 from utils.utils import *
-from models.networks.submodules import *
 from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm

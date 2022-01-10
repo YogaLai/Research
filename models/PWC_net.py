@@ -16,7 +16,6 @@ import matplotlib.image as mpimg
 from PIL import Image
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
-from .networks.submodules import *
 # from .networks.correlation_package.correlation import Correlation
 from networks.correlation_package.correlation import Correlation
 
