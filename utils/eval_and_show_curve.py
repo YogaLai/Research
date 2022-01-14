@@ -106,7 +106,7 @@ def eval(epoch, pred_disparities, writer):
 if __name__ == '__main__':
     writer = SummaryWriter('logs/evaluate/' + args.exp_name)
     npy_dict = {}
-    path = os.path.join('out_npy', 'disparities_' + args.exp_name)
+    path = os.path.join('out_npy', args.exp_name)
     for file in os.listdir(path):
         # print(file)
         id = file.split('_')[-1].split('.')[0]
