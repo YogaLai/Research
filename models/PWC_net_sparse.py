@@ -63,6 +63,7 @@ class PWCDCNet(nn.Module):
         self.conv6b  = myconv(196,196, kernel_size=3, stride=1)
 
         self.corr    = Correlation(pad_size=md, kernel_size=1, max_displacement=md, stride1=1, stride2=1, corr_multiply=1)
+        self.sparse_corr    = Correlation(pad_size=md, kernel_size=1, max_displacement=md+2, stride1=2, stride2=2, corr_multiply=1)
         self.leakyRELU = nn.LeakyReLU(0.1)
         
         nd = (2*md+1)**2
@@ -156,7 +157,10 @@ class PWCDCNet(nn.Module):
 
         vgrid = vgrid.permute(0,2,3,1)
         output = nn.functional.grid_sample(x, vgrid)
-        mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
+        # mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
+        mask = torch.autograd.Variable(torch.ones(x.size()))
+        if x.is_cuda:
+            mask = mask.cuda()
         mask = nn.functional.grid_sample(mask, vgrid)
 
         # if W==128:
@@ -471,7 +475,8 @@ class PWCDCNet_old(nn.Module):
         up_feat3 = self.upfeat3(x)
         
         warp2 = self.warp(c22, up_flow3*5.0) 
-        corr2 = self.corr(c12, warp2)
+        # corr2 = self.corr(c12, warp2)
+        corr2 = self.sparse_corr(c12, warp2)
         corr2 = self.leakyRELU(corr2)
         x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
         x = torch.cat((x, self.conv2_0(x)),1)
