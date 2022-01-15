@@ -16,11 +16,14 @@ parser.add_argument('--max_depth',           type=float, help='maximum depth for
 parser.add_argument('--eigen_crop',                      help='if set, crops according to Eigen NIPS14',   action='store_true')
 parser.add_argument('--garg_crop',                       help='if set, crops according to Garg  ECCV16',   action='store_true')
 parser.add_argument('--exp_name',            type=str,   help='evaluate png path', required=True)
+parser.add_argument('--epoch_thres',            type=int,   default=0)
+
 
 args = parser.parse_args()
 
 
 def eval(epoch, pred_disparities, writer):
+    print('Epoch', epoch)
     if args.split == 'kitti':
         num_samples = 200
         
@@ -110,6 +113,8 @@ if __name__ == '__main__':
     for file in os.listdir(path):
         # print(file)
         id = file.split('_')[-1].split('.')[0]
+        if int(id) < args.epoch_thres:
+            continue
         npy_dict[id]=os.path.join(path, file)
     
     npy_dict = sorted(npy_dict.items(), key=lambda x: int(x[0])) # sort by key
