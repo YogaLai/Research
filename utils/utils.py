@@ -279,6 +279,20 @@ def get_soft_mask(backward_flow, fw, eps=1e-3, neg_disp=False):
     mask = torch.clamp(mask, 0, 1)
     return mask
 
+def get_cross_mask(bw_flow, bw_flow2, fw, eps=1e-3):
+    one = torch.ones([bw_flow.size(0), 1, bw_flow.size(2), bw_flow.size(3)]).to(bw_flow.device).contiguous()
+    bw_flow, bw_flow2 = bw_flow.permute(0,2,3,1).contiguous(), bw_flow2.permute(0,2,3,1).contiguous()
+    mask = fw(one, bw_flow)
+    mask = fw(mask, bw_flow2)
+    mask += eps
+    mask = torch.clamp(mask, 0, 1)
+
+    return mask
+
+def cross_loss_func(loss):
+    loss = torch.mean(torch.abs(loss))
+    return loss
+
 def generate_flow_left(self, disp):
     b, _, h, w = disp.shape
     zero = torch.zero([b, 1, h, w]).to(disp.device)

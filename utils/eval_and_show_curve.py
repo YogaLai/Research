@@ -17,8 +17,6 @@ parser.add_argument('--eigen_crop',                      help='if set, crops acc
 parser.add_argument('--garg_crop',                       help='if set, crops according to Garg  ECCV16',   action='store_true')
 parser.add_argument('--exp_name',            type=str,   help='evaluate png path', required=True)
 parser.add_argument('--epoch_thres',            type=int,   default=0)
-
-
 args = parser.parse_args()
 
 
