@@ -122,8 +122,8 @@ for epoch in range(start_epoch, args.num_epochs):
                 fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
                 fw += 1e-3
                 bw += 1e-3
-                fw[[0,1,6,7]] = fw[[0,1,6,7]] * 0 + 1
-                bw[[0,1,6,7]] = bw[[0,1,6,7]] * 0 + 1
+                fw[slices[0]+slices[-1]] = fw[slices[0]+slices[-1]] * 0 + 1
+                bw[slices[0]+slices[-1]] = bw[slices[0]+slices[-1]] * 0 + 1
                 # fw = get_soft_mask(disp_est_scale_2[i], foward_warp_mod, slices)
                 # bw = get_soft_mask(disp_est_scale[i], foward_warp_mod, slices, neg_disp=True)
                 fw_detached = fw.clone().detach()
@@ -240,13 +240,13 @@ for epoch in range(start_epoch, args.num_epochs):
                 writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
                 writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
            
-            if iter % 200 == 0:
+            if iter % 100 == 0:
                 writer.add_images('fw_mask', fw_mask[0], iter)
                 writer.add_images('bw_mask', bw_mask[0], iter)
                 writer.add_images('left_rgb', left_image_1, iter)
                 writer.add_images('right_rgb', right_image_1, iter)
 
-            if (iter+1) % 1500 == 0:
+            if (iter+1) % 600 == 0:
                 state = {'iter': iter, 'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
                 torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
                 print("The model of iter ", iter, "has been saved.")
