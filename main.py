@@ -13,9 +13,10 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-from models.PWC_net import *
-from models.PWC_net import PWCDCNet
+# from models.PWC_net import *
+# from models.PWC_net import PWCDCNet
 # from models.PWC_net_my_correlation import *
+from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -62,6 +63,9 @@ elif args.model_name == 'pwc':
 
 if torch.cuda.device_count() >=2:
     net = nn.DataParallel(net) 
+    
+total = sum(p.numel() for p in net.parameters())
+print("Total params: %.2fM" % (total/1e6))
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 CycleLoader = torch.utils.data.DataLoader(
@@ -208,11 +212,13 @@ for epoch in range(start_epoch, args.num_epochs):
                 loss += 0.1 * sum([warp_2(warp2_est_5[i], left_pyramid[i][[0,1]], mask_5[i], args) for i in range(4)])
                 
             elif args.type_of_2warp == 2:
-                mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
+                # mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
+                mask = [get_cross_mask(disp_est_scale_2[i][[2,3]], disp_est_scale[i][[6,7]], foward_warp_mod) for i in range(4)]
                 warp2_est = [Resample2d()(left_est[i][[2,3]], disp_est_scale_2[i][[6,7]]) for i in range(4)]
                 warp2loss = sum([warp_2(warp2_est[i], right_est[i][[6,7]], mask[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss
-                mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
+                # mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
+                mask_3 = [get_cross_mask(disp_est_scale_2[i][[4,5]], disp_est_scale_2[i][[6,7]], foward_warp_mod) for i in range(4)]
                 warp2_est_3 = [Resample2d()(left_est[i][[4,5]], disp_est_scale[i][[6,7]]) for i in range(4)]
                 warp2loss_2 = sum([warp_2(warp2_est_3[i], left_est[i][[6,7]], mask_3[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss_2

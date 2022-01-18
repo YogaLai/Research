@@ -13,7 +13,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-from models.PWC_net_my_correlation import *
+from models.PWC_net_sparse import *
+# from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 # from models.RT_stereov4 import HRstereoNet
@@ -92,8 +93,6 @@ for epoch, ckt in ckt_dict:
     
         left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
         right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
-        
-        left_pyramid = make_pyramid(left_batch, 4)
         
         model_input = Variable(torch.cat((left_batch, right_batch), 1))
         if args.cuda:

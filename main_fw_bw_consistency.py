@@ -15,7 +15,8 @@ import cv2
 from models.MonodepthModel import *
 # from models.PWC_net import *
 # from models.PWC_net import PWCDCNet
-from models.PWC_net_my_correlation import *
+# from models.PWC_net_my_correlation import *
+from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -228,8 +229,9 @@ for epoch in range(start_epoch, args.num_epochs):
             writer.add_scalar('Train_iter/smooth_loss', disp_gradient_loss.data, iter)
             writer.add_scalar('Train_iter/smooth_loss_2', disp_gradient_loss_2.data, iter)
             writer.add_scalar('Train_iter/lr_consistency', lr_loss.data, iter)
-            writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
-            writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
+            if args.type_of_2warp > 0:
+                writer.add_scalar('Train_iter/warp2loss', warp2loss.data, iter)
+                writer.add_scalar('Train_iter/warp2loss_2', warp2loss_2.data, iter)
            
             if iter % 200 == 0:
                 writer.add_images('fw_mask', fw_mask[0], iter)
