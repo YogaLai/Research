@@ -263,11 +263,11 @@ def transformer_fwd(im0, flow):
     im1 = im1.reshape(B,C,H,W)
     return im1
 
-def get_soft_mask(backward_flow, fw, eps=1e-3, neg_disp=False):
+def get_soft_mask(backward_flow, fw, slices, eps=1e-3, neg_disp=False):
     one = torch.ones([backward_flow.size(0), 1, backward_flow.size(2), backward_flow.size(3)]).to(backward_flow.device).contiguous()
     if neg_disp:
         disp = backward_flow.clone().detach()
-        disp[[2,3,4,5]] = -disp[[2,3,4,5]]
+        disp[slices[1]+slices[2]] = -disp[slices[1]+slices[2]]
     else:
         disp = backward_flow
 

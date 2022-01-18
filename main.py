@@ -60,6 +60,9 @@ elif args.model_name == 'pwc':
     net = pwc_dc_net().cuda()
     args.input_width = 832
 
+if torch.cuda.device_count() >=2:
+    net = nn.DataParallel(net) 
+
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 CycleLoader = torch.utils.data.DataLoader(
          myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args), 
@@ -76,7 +79,7 @@ if args.loadmodel:
     iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
 for epoch in range(start_epoch, args.num_epochs):
-    
+    print("Epoch :", epoch)
     scheduler.step()
 
     with tqdm(total=len(CycleLoader.dataset)) as pbar:
@@ -225,14 +228,6 @@ for epoch in range(start_epoch, args.num_epochs):
             loss.backward()
             optimizer.step()
             
-            if args.model_name == 'monodepth':
-                print("Epoch :", epoch)
-                print("Batch Index :", batch_idx)
-                print(net.conv1.weight.grad[0,0,0,0])
-            elif args.model_name == 'pwc':
-                print("Epoch :", epoch)
-                print("Batch Index :", batch_idx)
-                print(net.conv1a[0].weight.grad[0,0,0,0])
 
             writer.add_scalar('Train_iter/rec_loss', image_loss.data, iter)
             writer.add_scalar('Train_iter/rec_loss_2', image_loss_2.data, iter)
@@ -250,7 +245,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 writer.add_images('right_rgb', right_image_1, iter)
 
             if (iter+1) % 1500 == 0:
-                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
                 torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
                 print("The model of iter ", iter, "has been saved.")
             
@@ -262,7 +257,7 @@ for epoch in range(start_epoch, args.num_epochs):
 
 
     # if epoch % 1 == 0:
-    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    state = {'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
            
