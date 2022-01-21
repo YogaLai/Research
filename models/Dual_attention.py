@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
 
@@ -21,7 +22,7 @@ class DualAttention(nn.Module):
                 if m.bias is not None:
                     m.bias.data.zero_()
     
-    def forward(self,x):
+    def forward(self,x, vis_attn=False):
         b, c, h ,w = x.shape
         # CA
         ca = self.global_avg_pooling(x)
@@ -38,12 +39,16 @@ class DualAttention(nn.Module):
 
         # fusion
         attn = ca + sa
-        attn = nn.functional.sigmoid(attn)
+        attn = torch.sigmoid(attn)
 
         x = attn * x + x
-        return x
+        if vis_attn:
+            return x, attn
+        else:
+            return x
 
 if __name__ == '__main__':
     feat = torch.ones([8, 32, 64, 208]).cuda()
     dual_attn = DualAttention(32).cuda()
-    out = dual_attn(feat)
+    out, attn = dual_attn(feat, True)
+    plt.imsave('visualization/attn_map.png', attn[0,0,:,:].cpu().data.numpy(), cmap='gray')
