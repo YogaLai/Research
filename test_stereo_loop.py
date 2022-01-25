@@ -13,8 +13,9 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-from models.PWC_net_sparse import *
-# from models.PWC_net_small import *
+# from models.PWC_net_small_sparse import *
+# from models.PWC_net_small_attn import *
+from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 # from models.RT_stereov4 import HRstereoNet
@@ -111,4 +112,6 @@ for epoch, ckt in ckt_dict:
 
         disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
     print('done')
-    np.save(f'./out_npy/disparities_{args.exp_name}_{epoch}.npy', disparities)
+    if not os.path.isdir('out_npy/' + args.exp_name):
+        os.makedirs('out_npy/' + args.exp_name)
+    np.save(f'./out_npy/{args.exp_name}/disparities_{args.exp_name}_{epoch}.npy', disparities)
