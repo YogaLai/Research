@@ -13,15 +13,14 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
-from models.PWC_net_small import *
+from models.PWC_net_small_attn import *
 from utils.scene_dataloader import *
 from utils.utils import *
-from models.RT_stereov4 import HRstereoNet
 
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--split',                     type=str,   help='validation set', default='kitti')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
