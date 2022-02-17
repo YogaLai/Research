@@ -120,8 +120,8 @@ class DAP(nn.Module):
 class DICL(nn.Module):
     def __init__(self):
         super(DICL,self).__init__()
-        # self.feature = FeatureGA()
-        self.feature = FeatureExtractionPWC()
+        self.feature = FeatureGA()
+        # self.feature = FeatureExtractionPWC()
 
         # if cfg.DAP_LAYER:
         if True:
@@ -260,10 +260,10 @@ class DICL(nn.Module):
         h,w = images.shape[2], images.shape[3]
         
         # feature extraction
-        # _,x2,x3,x4,x5,x6 = self.feature(x)       
-        # _,y2,y3,y4,y5,y6 = self.feature(y)
-        x2,x3,x4,x5,x6 = self.feature(x)
-        y2,y3,y4,y5,y6 = self.feature(y)
+        _,x2,x3,x4,x5,x6 = self.feature(x)       
+        _,y2,y3,y4,y5,y6 = self.feature(y)
+        # x2,x3,x4,x5,x6 = self.feature(x)
+        # y2,y3,y4,y5,y6 = self.feature(y)
 
         # compute flow for level 6
         cost6 = self.compute_cost(x6,y6,self.matching2,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
@@ -336,10 +336,10 @@ class DICL(nn.Module):
         flow2 = flow2 + self.context_net2(feat2)*cfg.SCALE_CONTEXT2
 
 
-        flow2 = self.upsample_flow(flow2, h, w)
-        flow3 = self.upsample_flow(flow3, h//2, w//2)
-        flow4 = self.upsample_flow(flow4, h//4, w//4)
-        flow5 = self.upsample_flow(flow5, h//8, w//8)
+        # flow2 = self.upsample_flow(flow2, h, w)
+        # flow3 = self.upsample_flow(flow3, h//2, w//2)
+        # flow4 = self.upsample_flow(flow4, h//4, w//4)
+        # flow5 = self.upsample_flow(flow5, h//8, w//8)
         
 
         # if cfg.SUP_RAW_FLOW: 

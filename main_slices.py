@@ -1,22 +1,12 @@
 import torch
-import torchvision
-import torchvision.transforms as transforms
-import torch.utils.data as data
-import numpy as np
 from torch.autograd import Variable
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-import random
-from PIL import Image
-import matplotlib.pyplot as plt
-import cv2
-from models.MonodepthModel import *
 # from models.PWC_net import *
-# from models.PWC_net_my_correlation import *
-# from models.PWC_net_sparse import *
-from models.PWC_net_small import *
+# from models.PWC_net_small_sparse import *
+from models.PWC_net_small_attn import *
+# from models.PWC_net_CM import *
+from models.DICL import dicl_wrapper
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -24,11 +14,12 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
 from Forward_Warp.forward_warp import forward_warp
+from config import cfg, cfg_from_file
 
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
@@ -60,6 +51,11 @@ if args.model_name == 'monodepth':
 elif args.model_name == 'pwc':
     net = pwc_dc_net().cuda()
     args.input_width = 832
+elif args.model_name == 'dicl':
+    cfg_from_file('cfgs/dicl5_kitti.yml')
+    net = dicl_wrapper().cuda()
+    args.input_width = 768
+
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 CycleLoader = torch.utils.data.DataLoader(
@@ -80,12 +76,11 @@ if args.loadmodel:
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
-if torch.cuda.device_count() >=2:
-    net = nn.DataParallel(net) 
+# if torch.cuda.device_count() >=2:
+#     net = nn.DataParallel(net) 
 
 for epoch in range(start_epoch, args.num_epochs):
     print("Epoch :", epoch)
-    scheduler.step()
 
     with tqdm(total=len(CycleLoader.dataset)) as pbar:
         for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(CycleLoader):
@@ -105,7 +100,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 disp_est_scale, disp_est = net(model_input)
                 disp_est_scale_2, disp_est_2 = net(model_input_2)
                 
-            elif args.model_name == 'pwc':
+            elif args.model_name == 'pwc' or args.model_name == 'dicl':
                 disp_est_scale = net(model_input)
                 disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3],
                                     disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
@@ -227,6 +222,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 warp2_est_2 = [Resample2d()(right_est[i][[0,1]], disp_est_scale[i][[4,5]]) for i in range(4)]
                 loss += 0.1 * sum([warp_2(warp2_est_2[i], right_pyramid[i][[6,7]], mask_2[i], args) for i in range(4)])
                 
+                
             loss.backward()
             optimizer.step()
             
@@ -247,7 +243,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 writer.add_images('right_rgb', right_image_1, iter)
 
             if (iter+1) % 600 == 0:
-                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
                 torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
                 print("The model of iter ", iter, "has been saved.")
             
@@ -257,9 +253,10 @@ for epoch in range(start_epoch, args.num_epochs):
             )
             pbar.update(left_image_1.size(0))
 
+    scheduler.step()
 
     # if epoch % 1 == 0:
-    state = {'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
            
