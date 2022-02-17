@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-
-# feat1 = torch.ones([8,196,7,16])
-# feat2 = feat1.clone()
+from networks.correlation_package.correlation import Correlation
 
 class MyCorrelation(nn.Module):
     def __init__(self, d=4):
@@ -18,26 +16,101 @@ class MyCorrelation(nn.Module):
                 cv.append(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
         
         return torch.cat(cv, axis=1)
-      
-class AttnCorrelation(nn.Module):
-    def __init__(self, in_channels, d=4, reduce_factor=8):
-        super(AttnCorrelation,self).__init__()
-        self.d = d
-        self.conv_q = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
-        self.conv_k = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
-    
+
+class BasicConv(nn.Module):
+    def __init__(self, in_channels, out_channels, deconv=False, bn=True, relu=True, **kwargs):
+        super(BasicConv, self).__init__()
+        self.relu = relu
+        self.use_bn = bn
+        if self.use_bn: self.bn = nn.BatchNorm2d(out_channels)
+        if deconv:
+            self.conv = nn.ConvTranspose2d(in_channels, out_channels, bias=False, **kwargs)
+        else:
+            self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        
+    def forward(self, x):
+        x = self.conv(x)
+        if self.use_bn:
+            x = self.bn(x)
+        if self.relu:
+            x = F.relu(x, inplace=True)
+        return x
+
+class GwcCorrelation(nn.Module):
+    def __init__(self, d=4, n_groups=16):
+        super(GwcCorrelation,self).__init__()
+        self.n_groups = n_groups
+        self.corr = Correlation(pad_size=d, kernel_size=1, max_displacement=d, stride1=1, stride2=1, corr_multiply=1)
+        self.cost_net = nn.Sequential(
+            BasicConv(16,32, kernel_size=3, padding=1),
+            BasicConv(32,64, kernel_size=3, padding=1, stride=2),
+            BasicConv(64,64, kernel_size=3, padding=1),
+            BasicConv(64,32, kernel_size=3, padding=1),
+            BasicConv(32,16, kernel_size=4, padding=1, stride=2, deconv=True),
+            nn.Conv2d(16,1, kernel_size=3, padding=1)
+        )
+            # BasicConv(64, 96, kernel_size=3, padding=1,   dilation=1),
+            # BasicConv(96, 128, kernel_size=3, stride=2,    padding=1),   # down by 1/2
+            # BasicConv(128, 128, kernel_size=3, padding=1,   dilation=1),
+            # BasicConv(128, 64, kernel_size=3, padding=1,   dilation=1),
+            # BasicConv(64, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+            # nn.Conv2d(32, 1  , kernel_size=3, stride=1, padding=1, bias=True),)
+
     def forward(self, feat1, feat2):
         h, w = feat1.size(2), feat1.size(3)
-        feat1 = self.conv_q(feat1)
-        feat2 = self.conv_k(feat2)
+        feat1 = feat1.chunk(self.n_groups, dim=1)
+        feat2 = feat2.chunk(self.n_groups, dim=1)
+        cv = []
+        for i in range(len(feat1)):
+            cv.append(self.corr(feat1[i], feat2[i]).unsqueeze(1))
+        cv = torch.cat(cv, axis=1).contiguous()
+        b,c,d,h,w = cv.shape
+        cv = cv.view(b*d, c, h, w)
+        cv = self.cost_net(cv)
+        cv = cv.view(b, d, h, w)
+        return cv
+
+class AttnCorrelation(nn.Module):
+    def __init__(self, in_channel, d=4, reduction_ratio=16):
+        super(AttnCorrelation,self).__init__()
+        self.d = d
+        self.global_avg_pooling = nn.AdaptiveAvgPool2d(1)
+        self.ca_conv1 = nn.Conv2d(in_channel, in_channel//reduction_ratio, 1)
+        self.ca_conv2 = nn.Conv2d(in_channel//reduction_ratio, in_channel, 1)
+    
+    def forward(self, feat1, feat2):
+        _, c, h, w = feat1.shape
         cv = []
         feat2 = torch.nn.functional.pad(feat2, [self.d,self.d,self.d,self.d], "constant", 0)
         for i in range(2*self.d+1):
             for j in range(2*self.d+1):
-                corr = torch.nn.functional.softmax(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
-                cv.append(corr)
+                similarity = feat1*feat2[:,:,i:(i+h),j:(j+w)]
+                attn = self.global_avg_pooling(similarity)
+                attn = self.ca_conv2(self.ca_conv1(attn))
+                attn = torch.sigmoid(attn)
+                cv.append(torch.mean(attn*similarity, dim=1, keepdim=True))
         
         return torch.cat(cv, axis=1)
+
+# class AttnCorrelation(nn.Module):
+#     def __init__(self, in_channels, d=4, reduce_factor=8):
+#         super(AttnCorrelation,self).__init__()
+#         self.d = d
+#         self.conv_q = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
+#         self.conv_k = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
+    
+#     def forward(self, feat1, feat2):
+#         h, w = feat1.size(2), feat1.size(3)
+#         feat1 = self.conv_q(feat1)
+#         feat2 = self.conv_k(feat2)
+#         cv = []
+#         feat2 = torch.nn.functional.pad(feat2, [self.d,self.d,self.d,self.d], "constant", 0)
+#         for i in range(2*self.d+1):
+#             for j in range(2*self.d+1):
+#                 corr = torch.nn.functional.softmax(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
+#                 cv.append(corr)
+        
+#         return torch.cat(cv, axis=1)
 
 def split_correlation(feat1, feat2, direction, d=4 ):
     assert direction == 'horizontal' or direction == 'vertical'
