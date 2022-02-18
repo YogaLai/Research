@@ -1,12 +1,11 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import argparse
 # from models.PWC_net import *
-from models.PWC_net_vec_attn import *
+# from models.PWC_net_small_sparse import *
+from models.PWC_net_small_attn import *
 # from models.PWC_net_CM import *
-# from models.PWC_net_small import *
+from models.DICL import dicl_wrapper
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -14,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
 from Forward_Warp.forward_warp import forward_warp
+# from config import cfg, cfg_from_file
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -49,6 +49,11 @@ if not os.path.isdir('savemodel/' + args.exp_name):
 if args.model_name == 'pwc':
     net = pwc_dc_net().cuda()
     args.input_width = 832
+elif args.model_name == 'dicl':
+    cfg_from_file('cfgs/dicl5_kitti.yml')
+    net = dicl_wrapper().cuda()
+    args.input_width = 768
+
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 CycleLoader = torch.utils.data.DataLoader(
@@ -69,12 +74,11 @@ if args.loadmodel:
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
-if torch.cuda.device_count() >=2:
-    net = nn.DataParallel(net) 
+# if torch.cuda.device_count() >=2:
+#     net = nn.DataParallel(net) 
 
 for epoch in range(start_epoch, args.num_epochs):
     print("Epoch :", epoch)
-    scheduler.step()
 
     with tqdm(total=len(CycleLoader.dataset)) as pbar:
         for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(CycleLoader):
@@ -217,6 +221,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 warp2_est_2 = [Resample2d()(right_est[i][[0,1]], disp_est_scale[i][[4,5]]) for i in range(4)]
                 loss += 0.1 * sum([warp_2(warp2_est_2[i], right_pyramid[i][[6,7]], mask_2[i], args) for i in range(4)])
                 
+                
             loss.backward()
             optimizer.step()
             
@@ -247,6 +252,7 @@ for epoch in range(start_epoch, args.num_epochs):
             )
             pbar.update(left_image_1.size(0))
 
+    scheduler.step()
 
     # if epoch % 1 == 0:
     state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
