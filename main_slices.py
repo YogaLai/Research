@@ -1,22 +1,12 @@
 import torch
-import torchvision
-import torchvision.transforms as transforms
-import torch.utils.data as data
-import numpy as np
-from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-import random
-from PIL import Image
-import matplotlib.pyplot as plt
-import cv2
-from models.MonodepthModel import *
 # from models.PWC_net import *
-# from models.PWC_net_my_correlation import *
-# from models.PWC_net_sparse import *
-from models.PWC_net_small import *
+from models.PWC_net_vec_attn import *
+# from models.PWC_net_CM import *
+# from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -28,7 +18,7 @@ from Forward_Warp.forward_warp import forward_warp
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
@@ -55,9 +45,8 @@ start_epoch = 0
 
 if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
-if args.model_name == 'monodepth':
-    net = MonodepthNet().cuda()
-elif args.model_name == 'pwc':
+
+if args.model_name == 'pwc':
     net = pwc_dc_net().cuda()
     args.input_width = 832
 
@@ -98,26 +87,21 @@ for epoch in range(start_epoch, args.num_epochs):
             left_pyramid = make_pyramid(former, 4)
             right_pyramid = make_pyramid(latter, 4)
 
-            model_input = Variable(torch.cat((former, latter), 1).cuda())
-            model_input_2 = Variable(torch.cat((latter, former), 1).cuda())
+            model_input = torch.cat((former, latter), 1).cuda()
+            model_input_2 = torch.cat((latter, former), 1).cuda()
             
-            if args.model_name == 'monodepth':
-                disp_est_scale, disp_est = net(model_input)
-                disp_est_scale_2, disp_est_2 = net(model_input_2)
-                
-            elif args.model_name == 'pwc':
-                disp_est_scale = net(model_input)
-                disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3],
-                                    disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
-                disp_est_scale_2 = net(model_input_2)
-                disp_est_2 = [torch.cat((disp_est_scale_2[i][:,0,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[3],
-                                        disp_est_scale_2[i][:,1,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[2]), 1) for i in range(4)]
+            disp_est_scale = net(model_input)
+            disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3],
+                                disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
+            disp_est_scale_2 = net(model_input_2)
+            disp_est_2 = [torch.cat((disp_est_scale_2[i][:,0,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[3],
+                                    disp_est_scale_2[i][:,1,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[2]), 1) for i in range(4)]
             
             border_mask = [create_border_mask(left_pyramid[i], 0.1) for i in range(4)]
             
             fw_mask = []
             bw_mask = []
-            foward_warp_mod = forward_warp()
+            # foward_warp_mod = forward_warp()
             for i in range(4):
                 fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
                 fw += 1e-3
@@ -210,13 +194,19 @@ for epoch in range(start_epoch, args.num_epochs):
                 loss += 0.1 * sum([warp_2(warp2_est_5[i], left_pyramid[i][[0,1]], mask_5[i], args) for i in range(4)])
                 
             elif args.type_of_2warp == 2:
-                mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
-                warp2_est = [Resample2d()(left_est[i][[2,3]], disp_est_scale_2[i][[6,7]]) for i in range(4)]
-                warp2loss = sum([warp_2(warp2_est[i], right_est[i][[6,7]], mask[i], args) for i in range(4)])
+                # mask = [Resample2d()(fw_mask[i][[2,3]], disp_est_scale_2[i][[0,1]]) for i in range(4)]
+                mask = [Resample2d()(fw_mask[i][slices[1]], disp_est_scale_2[i][slices[0]]) for i in range(4)]
+                # warp2_est = [Resample2d()(left_est[i][[2,3]], disp_est_scale_2[i][[6,7]]) for i in range(4)]
+                warp2_est = [Resample2d()(left_est[i][slices[1]], disp_est_scale_2[i][slices[-1]]) for i in range(4)]
+                # warp2loss = sum([warp_2(warp2_est[i], right_est[i][[6,7]], mask[i], args) for i in range(4)])
+                warp2loss = sum([warp_2(warp2_est[i], right_est[i][slices[-1]], mask[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss
-                mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
-                warp2_est_3 = [Resample2d()(left_est[i][[4,5]], disp_est_scale[i][[6,7]]) for i in range(4)]
-                warp2loss_2 = sum([warp_2(warp2_est_3[i], left_est[i][[6,7]], mask_3[i], args) for i in range(4)])
+                # mask_3 = [Resample2d()(fw_mask[i][[4,5]], disp_est_scale[i][[0,1]]) for i in range(4)]
+                mask_3 = [Resample2d()(fw_mask[i][slices[2]], disp_est_scale[i][slices[0]]) for i in range(4)]
+                # warp2_est_3 = [Resample2d()(left_est[i][[4,5]], disp_est_scale[i][[6,7]]) for i in range(4)]
+                warp2_est_3 = [Resample2d()(left_est[i][slices[2]], disp_est_scale[i][slices[-1]]) for i in range(4)]
+                # warp2loss_2 = sum([warp_2(warp2_est_3[i], left_est[i][[6,7]], mask_3[i], args) for i in range(4)])
+                warp2loss_2 = sum([warp_2(warp2_est_3[i], left_est[i][slices[-1]], mask_3[i], args) for i in range(4)])
                 loss += 0.1 * warp2loss_2
                 
             elif args.type_of_2warp == 3:
@@ -247,7 +237,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 writer.add_images('right_rgb', right_image_1, iter)
 
             if (iter+1) % 600 == 0:
-                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+                state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
                 torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
                 print("The model of iter ", iter, "has been saved.")
             
@@ -259,7 +249,7 @@ for epoch in range(start_epoch, args.num_epochs):
 
 
     # if epoch % 1 == 0:
-    state = {'epoch': epoch, 'state_dict': net.module.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
            
