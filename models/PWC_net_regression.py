@@ -98,7 +98,7 @@ class PWCDCNet(nn.Module):
         self.flow_regression = FlowRegression(md, md)
 
         nd = (2*md+1)**2
-        self.num_blocks = 2
+        self.num_blocks = 3
         # dd = np.cumsum([128,128,96,64,32])
 
         # self.cascade_attn0 = DualAttention(128)
