@@ -1,3 +1,4 @@
+from imp import SEARCH_ERROR
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -7,6 +8,8 @@ import torch.nn.functional as F
 import numpy as np
 from config import cfg
 import pdb
+
+from models.SAM import VecAttn
 # from spatial_correlation_sampler import SpatialCorrelationSampler
 
 
@@ -91,6 +94,35 @@ class FlowRegression(nn.Module):
         flow  = torch.cat((flowU.unsqueeze(1),flowV.unsqueeze(1)),dim=1)
         return flow
 
+class DispRegression(nn.Module):
+    # 2D soft argmin/argmax
+    def __init__(self, maxU):
+        super(DispRegression, self).__init__()
+        self.maxU = maxU
+
+    def forward(self, x):
+        assert(x.is_contiguous() == True)
+        sizeU = 2*self.maxU+1
+        x = x.squeeze(1)
+        B,_,H,W = x.shape
+
+        with torch.cuda.device_of(x):
+            # displacement along u 
+            dispU = torch.reshape(torch.arange(-self.maxU, self.maxU+1,device=torch.cuda.current_device(), dtype=torch.float32),[1,sizeU,1,1,1])
+            dispU = dispU.expand(B, -1, H,W).contiguous()
+            dispU = dispU.view(B,sizeU , H,W)
+            
+        x = x.view(B,sizeU,H,W)
+
+        if cfg.FLOW_REG_BY_MAX:
+            x = F.softmax(x,dim=1)
+        else:
+            x = F.softmin(x,dim=1)
+
+        flowU = (x*dispU).sum(dim=1)
+        zero = torch.zeros_like(flowU).unsqueeze(1)
+        flow  = torch.cat((flowU.unsqueeze(1),zero),dim=1)
+        return flow
 
 class DAP(nn.Module):
     def __init__(self, md=3):
@@ -118,10 +150,11 @@ class DAP(nn.Module):
 
 
 class DICL(nn.Module):
-    def __init__(self):
+    def __init__(self,):
         super(DICL,self).__init__()
-        self.feature = FeatureGA()
-        # self.feature = FeatureExtractionPWC()
+        # self.feature = FeatureGA()
+        # self.slices = slices
+        self.feature = FeatureExtractionPWC()
 
         # if cfg.DAP_LAYER:
         if True:
@@ -137,11 +170,11 @@ class DICL(nn.Module):
 
         # matching net, with the same arch at each pyramid level
         # level 6->2:  1/64,1/32,1/16,1/8,1/4
-        self.matching6 = DICL_MODULE()
-        self.matching5 = DICL_MODULE()
-        self.matching4 = DICL_MODULE()
-        self.matching3 = DICL_MODULE()
-        self.matching2 = DICL_MODULE()
+        self.matching6 = VecAttn(1, 64, 64//16, 64)
+        self.matching5 = VecAttn(1, 64, 64//16, 64)
+        self.matching4 = VecAttn(1, 64, 64//16, 64)
+        self.matching3 = VecAttn(1, 64, 64//16, 64)
+        self.matching2 = VecAttn(1, 64, 64//16, 64)
 
         # search range, e.g., [-3,3]
         # the search range for FlowRegression should be aligned with that when computing matching cost
@@ -260,16 +293,18 @@ class DICL(nn.Module):
         h,w = images.shape[2], images.shape[3]
         
         # feature extraction
-        _,x2,x3,x4,x5,x6 = self.feature(x)       
-        _,y2,y3,y4,y5,y6 = self.feature(y)
-        # x2,x3,x4,x5,x6 = self.feature(x)
-        # y2,y3,y4,y5,y6 = self.feature(y)
+        # _,x2,x3,x4,x5,x6 = self.feature(x)       
+        # _,y2,y3,y4,y5,y6 = self.feature(y)
+        x2,x3,x4,x5,x6 = self.feature(x)
+        y2,y3,y4,y5,y6 = self.feature(y)
 
         # compute flow for level 6
-        cost6 = self.compute_cost(x6,y6,self.matching2,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
+        # cost6 = self.compute_cost(x6,y6,self.matching2,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
+        cost6 = self.compute_cost(x6,y6,self.matching6,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
         # g6 = F.interpolate(images[:,:3,:,:],scale_factor=(1/64), mode='bilinear',align_corners=True)
         if self.dap_layer6 is not None: cost6 = self.dap_layer6(cost6)
         flow6 = self.flow6(cost6)
+        
         # if cfg.CTF_CONTEXT:
         #     if cfg.SUP_RAW_FLOW: raw_flow6 = flow6
         #     entro6 = self.entropy(cost6)
@@ -336,10 +371,10 @@ class DICL(nn.Module):
         flow2 = flow2 + self.context_net2(feat2)*cfg.SCALE_CONTEXT2
 
 
-        # flow2 = self.upsample_flow(flow2, h, w)
-        # flow3 = self.upsample_flow(flow3, h//2, w//2)
-        # flow4 = self.upsample_flow(flow4, h//4, w//4)
-        # flow5 = self.upsample_flow(flow5, h//8, w//8)
+        flow2 = self.upsample_flow(flow2, h, w)
+        flow3 = self.upsample_flow(flow3, h//2, w//2)
+        flow4 = self.upsample_flow(flow4, h//4, w//4)
+        flow5 = self.upsample_flow(flow5, h//8, w//8)
         
 
         # if cfg.SUP_RAW_FLOW: 
@@ -354,16 +389,32 @@ class DICL(nn.Module):
         sizeV = 2*maxV+1
         b,c,height,width = x.shape
 
-        with torch.cuda.device_of(x):
-            # init cost as tensor matrix
-            cost = x.new().resize_(x.size()[0], 2*c, 2*maxU+1,2*maxV+1, height,  width).zero_().requires_grad_(False)
+        if maxV == 0:
+            with torch.cuda.device_of(x):
+                # init cost as tensor matrix
+                cost = x.new().resize_(x.size()[0], 2*c, 2*maxU+1, height, width).zero_().requires_grad_(False)
+                for i in range(2*maxU+1):
+                    ind = i-maxU
+                    # for each displacement hypothesis, we construct a feature map as the input of matching net
+                    # here we hold them together for parallel processing later
+                    cost[:,:c,i,:,max(0,-ind):width-ind] = x[:,:,:,max(0,-ind):width-ind]
+                    cost[:,c:,i,:,max(0,-ind):width-ind] = y[:,:,:,max(0,ind):width+ind]
 
+            # (B, 2C, U, H, W) -> (B, U, 2C, H, W)
+            cost = cost.permute([0,2,1,3,4]).contiguous() 
+            # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+            cost = cost.view(x.size()[0]*sizeU,c*2, x.size()[2], x.size()[3])
+            # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+            cost = matchnet(cost)
+            cost = cost.view(x.size()[0],sizeU,1, x.size()[2],x.size()[3])
+            cost = cost.permute([0,2,1,3,4]).contiguous() 
 
-        if cfg.CUDA_COST:
-            # CUDA acceleration
-            corr = SpatialCorrelationSampler(kernel_size=1,patch_size=(int(1+2*3),int(1+2*3)),stride=1,padding=0,dilation_patch=1)
-            cost = corr(x, y)
         else:
+            with torch.cuda.device_of(x):
+                # init cost as tensor matrix
+                cost = x.new().resize_(x.size()[0], 2*c, 2*maxU+1,2*maxV+1, height,  width).zero_().requires_grad_(False)
+
+
             for i in range(2*maxU+1):
                 ind = i-maxU
                 for j in range(2*maxV+1):
@@ -373,20 +424,20 @@ class DICL(nn.Module):
                     cost[:,:c,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = x[:,:,max(0,-indd):height-indd,max(0,-ind):width-ind]
                     cost[:,c:,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = y[:,:,max(0,+indd):height+indd,max(0,ind):width+ind]
 
-        if cfg.REMOVE_WARP_HOLE:
-            # mitigate the effect of holes (may be raised by occ)
-            valid_mask = cost[:,c:,...].sum(dim=1)!=0
-            valid_mask = valid_mask.detach()
-            cost = cost*valid_mask.unsqueeze(1).float()
+            if cfg.REMOVE_WARP_HOLE:
+                # mitigate the effect of holes (may be raised by occ)
+                valid_mask = cost[:,c:,...].sum(dim=1)!=0
+                valid_mask = valid_mask.detach()
+                cost = cost*valid_mask.unsqueeze(1).float()
 
-        # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
-        cost = cost.permute([0,2,3,1,4,5]).contiguous() 
-        # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
-        cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
-        # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
-        cost = matchnet(cost)
-        cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
-        cost = cost.permute([0,3,1,2,4,5]).contiguous() 
+            # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
+            cost = cost.permute([0,2,3,1,4,5]).contiguous() 
+            # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+            cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
+            # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+            cost = matchnet(cost)
+            cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
+            cost = cost.permute([0,3,1,2,4,5]).contiguous() 
 
         # (B, U, V, H, W)
         return cost
@@ -512,15 +563,15 @@ class FeatureExtractionPWC(nn.Module):
         self.conv5a  = myconv(96, 128, kernel_size=3, stride=2)
         self.conv5aa = myconv(128,128, kernel_size=3, stride=1)
         self.conv5b  = myconv(128,128, kernel_size=3, stride=1)
-        self.conv6aa = myconv(128,196, kernel_size=3, stride=2)
-        self.conv6a  = myconv(196,196, kernel_size=3, stride=1)
-        self.conv6b  = myconv(196,196, kernel_size=3, stride=1)
+        self.conv6aa = myconv(128,192, kernel_size=3, stride=2)
+        self.conv6a  = myconv(192,192, kernel_size=3, stride=1)
+        self.conv6b  = myconv(192,192, kernel_size=3, stride=1)
 
-        self.outconv_2 = BasicConv(32, 32, kernel_size=3,  padding=1)
-        self.outconv_3 = BasicConv(64, 32, kernel_size=3,  padding=1)
-        self.outconv_4 = BasicConv(96, 32, kernel_size=3,  padding=1)
-        self.outconv_5 = BasicConv(128, 32, kernel_size=3,  padding=1)
-        self.outconv_6 = BasicConv(196, 32, kernel_size=3,  padding=1)
+        self.outconv_2 = myconv(32, 32, kernel_size=3,  padding=1)
+        self.outconv_3 = myconv(64, 32, kernel_size=3,  padding=1)
+        self.outconv_4 = myconv(96, 32, kernel_size=3,  padding=1)
+        self.outconv_5 = myconv(128, 32, kernel_size=3,  padding=1)
+        self.outconv_6 = myconv(192, 32, kernel_size=3,  padding=1)
 
     def forward(self, x):
         c11 = self.conv1b(self.conv1aa(self.conv1a(x)))
