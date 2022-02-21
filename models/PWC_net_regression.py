@@ -4,6 +4,8 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import os.path
+
+from models.lib.Bottleneck import Bottleneck
 from .Dual_attention import DualAttention
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
@@ -96,62 +98,43 @@ class PWCDCNet(nn.Module):
         self.flow_regression = FlowRegression(md, md)
 
         nd = (2*md+1)**2
-        dd = np.cumsum([128,128,96,64,32])
+        self.num_blocks = 2
+        # dd = np.cumsum([128,128,96,64,32])
 
-        self.cascade_attn0 = DualAttention(128)
-        self.cascade_attn1 = DualAttention(128)
-        self.cascade_attn2 = DualAttention(96)
-        self.cascade_attn3 = DualAttention(64)
-        self.cascade_attn4 = DualAttention(32)
+        # self.cascade_attn0 = DualAttention(128)
+        # self.cascade_attn1 = DualAttention(128)
+        # self.cascade_attn2 = DualAttention(96)
+        # self.cascade_attn3 = DualAttention(64)
+        # self.cascade_attn4 = DualAttention(32)
 
         od = nd
-        self.conv6_0 = myconv(od,      81, kernel_size=1, stride=1, padding=0)
-        self.bn6_0 = nn.BatchNorm2d(81)
-        self.conv6_1 = myconv(81,81, kernel_size=3, stride=1)
-        self.bn6_1 = nn.BatchNorm2d(81)
-        self.conv6_2 = myconv(81,81,  kernel_size=1, stride=1, padding=0)
-        self.bn6_2 = nn.BatchNorm2d(81)
+        self.cost_agg6 = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.cost_agg6.append(Bottleneck(nd))
         self.deconv6 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat6 = deconv(81, 2, kernel_size=4, stride=2, padding=1)
         
         # od = nd+128+4
-        od = 81
-        self.conv5_0 = myconv(od,      81, kernel_size=1, stride=1, padding=0)
-        self.bn5_0 = nn.BatchNorm2d(81)
-        self.conv5_1 = myconv(81,81, kernel_size=3, stride=1)
-        self.bn5_1 = nn.BatchNorm2d(81)
-        self.conv5_2 = myconv(81,81,  kernel_size=1, stride=1, padding=0)
-        self.bn5_2 = nn.BatchNorm2d(81)
+        self.cost_agg5 = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.cost_agg5.append(Bottleneck(nd))
         self.deconv5 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat5 = deconv(81, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+96+4
-        self.conv4_0 = myconv(od,      81, kernel_size=1, stride=1, padding=0)
-        self.bn4_0 = nn.BatchNorm2d(81)
-        self.conv4_1 = myconv(81,81, kernel_size=3, stride=1)
-        self.bn4_1 = nn.BatchNorm2d(81)
-        self.conv4_2 = myconv(81,81,  kernel_size=1, stride=1, padding=0)
-        self.bn4_2 = nn.BatchNorm2d(81)
+        self.cost_agg4 = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.cost_agg4.append(Bottleneck(nd))
         self.deconv4 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat4 = deconv(81, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+64+4
-        self.conv3_0 = myconv(od,      81, kernel_size=1, stride=1, padding=0)
-        self.bn3_0 = nn.BatchNorm2d(81)
-        self.conv3_1 = myconv(81,81, kernel_size=3, stride=1)
-        self.bn3_1 = nn.BatchNorm2d(81)
-        self.conv3_2 = myconv(81,81,  kernel_size=1, stride=1, padding=0)
-        self.bn3_2 = nn.BatchNorm2d(81)
+        self.cost_agg3 = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.cost_agg3.append(Bottleneck(nd))
         self.deconv3 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat3 = deconv(81, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+32+4
-        self.conv2_0 = myconv(od,      81, kernel_size=1, stride=1, padding=0)
-        self.bn2_0 = nn.BatchNorm2d(81)
-        self.conv2_1 = myconv(81,81, kernel_size=3, stride=1)
-        self.bn2_1 = nn.BatchNorm2d(81)
-        self.conv2_2 = myconv(81,81,  kernel_size=1, stride=1, padding=0)
-        self.bn2_2 = nn.BatchNorm2d(81)
+        self.cost_agg2 = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.cost_agg2.append(Bottleneck(nd))
         self.deconv2 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
         
         self.dc_conv1 = myconv(81, 81, kernel_size=3, stride=1, padding=1,  dilation=1)
@@ -228,40 +211,20 @@ class PWCDCNet(nn.Module):
 
 
         corr6 = self.corr(c16, c26) 
-        corr6 = self.leakyRELU(corr6)  
-
-        identity = corr6
-        x = self.conv6_0(corr6)
-        x = self.bn6_0(x)
-        x = self.leakyRELU(x)
-        x = self.conv6_1(x)
-        x = self.bn6_1(x)
-        x = self.leakyRELU(x)
-        x = self.conv6_2(x)
-        x = self.bn6_2(x)
-        x += identity
-        x = self.leakyRELU(x)
+        x = self.leakyRELU(corr6)
+        for i in range(self.num_blocks):
+            x = self.cost_agg6[i](x)
         flow6 = self.flow_regression(x)
-
         up_flow6 = self.deconv6(flow6)
         # up_feat6 = self.upfeat6(x)
 
         
         warp5 = self.warp(c25, up_flow6*0.625)
         corr5 = self.corr(c15, warp5) 
-        corr5 = self.leakyRELU(corr5)
+        x = self.leakyRELU(corr5)
         # x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
-        identity = corr5
-        x = self.conv5_0(corr5)
-        x = self.bn5_0(x)
-        x = self.leakyRELU(x)
-        x = self.conv5_1(x)
-        x = self.bn5_1(x)
-        x = self.leakyRELU(x)
-        x = self.conv5_2(x)
-        x = self.bn5_2(x)
-        x += identity
-        x = self.leakyRELU(x)
+        for i in range(self.num_blocks):
+            x = self.cost_agg5[i](corr5)
         flow5 = self.flow_regression(x)
         up_flow5 = self.deconv5(flow5)
         # up_feat5 = self.upfeat5(x)
@@ -269,19 +232,10 @@ class PWCDCNet(nn.Module):
        
         warp4 = self.warp(c24, up_flow5*1.25)
         corr4 = self.corr(c14, warp4)  
-        corr4 = self.leakyRELU(corr4)
+        x = self.leakyRELU(corr4)
         # x = torch.cat((corr4, c14, up_flow5, up_feat5), 1)
-        identity = corr4
-        x = self.conv4_0(corr4)
-        x = self.bn4_0(x)
-        x = self.leakyRELU(x)
-        x = self.conv4_1(x)
-        x = self.bn4_1(x)
-        x = self.leakyRELU(x)
-        x = self.conv4_2(x)
-        x = self.bn4_2(x)
-        x += identity
-        x = self.leakyRELU(x)
+        for i in range(self.num_blocks):
+            x = self.cost_agg4[i](corr4)
         flow4 = self.flow_regression(x)
         up_flow4 = self.deconv4(flow4)
         # up_feat4 = self.upfeat4(x)
@@ -289,19 +243,10 @@ class PWCDCNet(nn.Module):
 
         warp3 = self.warp(c23, up_flow4*2.5)
         corr3 = self.corr(c13, warp3) 
-        corr3 = self.leakyRELU(corr3)
+        x = self.leakyRELU(corr3)
         # x = torch.cat((corr3, c13, up_flow4, up_feat4), 1)
-        identity = corr3
-        x = self.conv3_0(corr3)
-        x = self.bn3_0(x)
-        x = self.leakyRELU(x)
-        x = self.conv3_1(x)
-        x = self.bn3_1(x)
-        x = self.leakyRELU(x)
-        x = self.conv3_2(x)
-        x = self.bn3_2(x)
-        x += identity
-        x = self.leakyRELU(x)
+        for i in range(self.num_blocks):
+            x = self.cost_agg3[i](corr3)
         flow3 = self.flow_regression(x)
         up_flow3 = self.deconv3(flow3)
         # up_feat3 = self.upfeat3(x)
@@ -309,19 +254,10 @@ class PWCDCNet(nn.Module):
 
         warp2 = self.warp(c22, up_flow3*5.0) 
         corr2 = self.corr(c12, warp2)
-        corr2 = self.leakyRELU(corr2)
+        x = self.leakyRELU(corr2)
         # x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
-        identity = corr2
-        x = self.conv2_0(corr2)
-        x = self.bn2_0(x)
-        x = self.leakyRELU(x)
-        x = self.conv2_1(x)
-        x = self.bn2_1(x)
-        x = self.leakyRELU(x)
-        x = self.conv2_2(x)
-        x = self.bn2_2(x)
-        x += identity
-        x = self.leakyRELU(x)
+        for i in range(self.num_blocks):
+            x = self.cost_agg2[i](corr2)
         flow2 = self.flow_regression(x)
  
         x = self.dc_conv4(self.dc_conv3(self.dc_conv2(self.dc_conv1(x))))
