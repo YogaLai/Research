@@ -10,6 +10,7 @@ from config import cfg
 import pdb
 
 from models.SAM import VecAttn
+from models.lib.Bottleneck import Bottleneck
 # from spatial_correlation_sampler import SpatialCorrelationSampler
 
 
@@ -40,8 +41,6 @@ class DICL_MODULE(nn.Module):
         x = self.match(x)
         return x
       
-
-
 
 class FlowEntropy(nn.Module):
     # Compute entro from matching cost
@@ -94,36 +93,6 @@ class FlowRegression(nn.Module):
         flow  = torch.cat((flowU.unsqueeze(1),flowV.unsqueeze(1)),dim=1)
         return flow
 
-class DispRegression(nn.Module):
-    # 2D soft argmin/argmax
-    def __init__(self, maxU):
-        super(DispRegression, self).__init__()
-        self.maxU = maxU
-
-    def forward(self, x):
-        assert(x.is_contiguous() == True)
-        sizeU = 2*self.maxU+1
-        x = x.squeeze(1)
-        B,_,H,W = x.shape
-
-        with torch.cuda.device_of(x):
-            # displacement along u 
-            dispU = torch.reshape(torch.arange(-self.maxU, self.maxU+1,device=torch.cuda.current_device(), dtype=torch.float32),[1,sizeU,1,1,1])
-            dispU = dispU.expand(B, -1, H,W).contiguous()
-            dispU = dispU.view(B,sizeU , H,W)
-            
-        x = x.view(B,sizeU,H,W)
-
-        if cfg.FLOW_REG_BY_MAX:
-            x = F.softmax(x,dim=1)
-        else:
-            x = F.softmin(x,dim=1)
-
-        flowU = (x*dispU).sum(dim=1)
-        zero = torch.zeros_like(flowU).unsqueeze(1)
-        flow  = torch.cat((flowU.unsqueeze(1),zero),dim=1)
-        return flow
-
 class DAP(nn.Module):
     def __init__(self, md=3):
         # Displacement-aware projection layer
@@ -170,11 +139,16 @@ class DICL(nn.Module):
 
         # matching net, with the same arch at each pyramid level
         # level 6->2:  1/64,1/32,1/16,1/8,1/4
-        self.matching6 = VecAttn(1, 64, 64//16, 64)
-        self.matching5 = VecAttn(1, 64, 64//16, 64)
-        self.matching4 = VecAttn(1, 64, 64//16, 64)
-        self.matching3 = VecAttn(1, 64, 64//16, 64)
-        self.matching2 = VecAttn(1, 64, 64//16, 64)
+        # self.matching6 = VecAttn(1, 64, 64//16, 64)
+        # self.matching5 = VecAttn(1, 64, 64//16, 64)
+        # self.matching4 = VecAttn(1, 64, 64//16, 64)
+        # self.matching3 = VecAttn(1, 64, 64//16, 64)
+        # self.matching2 = VecAttn(1, 64, 64//16, 64)
+        self.matching6 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
+        self.matching5 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
+        self.matching4 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
+        self.matching3 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
+        self.matching2 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
 
         # search range, e.g., [-3,3]
         # the search range for FlowRegression should be aligned with that when computing matching cost
@@ -195,34 +169,34 @@ class DICL(nn.Module):
                         BasicConv(96,  64 , kernel_size=3, padding=16,  dilation=16),
                         BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
                         nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
-            # self.context_net3 = nn.Sequential(
-            #             BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
-            #             BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
-            #             BasicConv(128, 128, kernel_size=3, padding=4,   dilation=4),
-            #             BasicConv(128, 96 , kernel_size=3, padding=8,   dilation=8),
-            #             BasicConv(96,  64 , kernel_size=3, padding=16,  dilation=16),
-            #             BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
-            #             nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
-            # self.context_net4 = nn.Sequential(
-            #             BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
-            #             BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
-            #             BasicConv(128, 128, kernel_size=3, padding=4,   dilation=4),
-            #             BasicConv(128, 64 , kernel_size=3, padding=8,   dilation=8),
-            #             BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
-            #             nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
-            # self.context_net5 = nn.Sequential(
-            #             BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
-            #             BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
-            #             BasicConv(128, 64, kernel_size=3, padding=4,   dilation=4),
-            #             BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
-            #             nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
-            # # We remove the last several layers on pyramid level 6,5,4 considering their inputs' resolution
-            # # though this does not have an obvious effect
-            # self.context_net6 = nn.Sequential(
-            #             BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
-            #             BasicConv(64 , 64, kernel_size=3, padding=2,   dilation=2),
-            #             BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
-            #             nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
+            self.context_net3 = nn.Sequential(
+                        BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
+                        BasicConv(128, 128, kernel_size=3, padding=4,   dilation=4),
+                        BasicConv(128, 96 , kernel_size=3, padding=8,   dilation=8),
+                        BasicConv(96,  64 , kernel_size=3, padding=16,  dilation=16),
+                        BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
+                        nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
+            self.context_net4 = nn.Sequential(
+                        BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
+                        BasicConv(128, 128, kernel_size=3, padding=4,   dilation=4),
+                        BasicConv(128, 64 , kernel_size=3, padding=8,   dilation=8),
+                        BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
+                        nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
+            self.context_net5 = nn.Sequential(
+                        BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(64,  128, kernel_size=3, padding=2,   dilation=2),
+                        BasicConv(128, 64, kernel_size=3, padding=4,   dilation=4),
+                        BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
+                        nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
+            # We remove the last several layers on pyramid level 6,5,4 considering their inputs' resolution
+            # though this does not have an obvious effect
+            self.context_net6 = nn.Sequential(
+                        BasicConv(38,  64, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(64 , 64, kernel_size=3, padding=2,   dilation=2),
+                        BasicConv(64,  32 , kernel_size=3, padding=1,   dilation=1),
+                        nn.Conv2d(32,  2  , kernel_size=3, stride=1, padding=1, bias=True))
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d)) or isinstance(m, nn.ConvTranspose2d):
@@ -301,59 +275,59 @@ class DICL(nn.Module):
         # compute flow for level 6
         # cost6 = self.compute_cost(x6,y6,self.matching2,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
         cost6 = self.compute_cost(x6,y6,self.matching6,cfg.SEARCH_RANGE[4],cfg.SEARCH_RANGE[4])
-        # g6 = F.interpolate(images[:,:3,:,:],scale_factor=(1/64), mode='bilinear',align_corners=True)
+        g6 = F.interpolate(images[:,:3,:,:],scale_factor=(1/64), mode='bilinear',align_corners=True)
         if self.dap_layer6 is not None: cost6 = self.dap_layer6(cost6)
         flow6 = self.flow6(cost6)
         
-        # if cfg.CTF_CONTEXT:
-        #     if cfg.SUP_RAW_FLOW: raw_flow6 = flow6
-        #     entro6 = self.entropy(cost6)
-        #     # input to context network
-        #     # including pred flow, entro, left img feat, left img
-        #     feat6 = torch.cat((flow6.detach(),entro6.detach(),x6,g6),dim=1)
-        #     flow6 = flow6 + self.context_net6(feat6)*cfg.SCALE_CONTEXT6
+        if cfg.CTF_CONTEXT:
+            if cfg.SUP_RAW_FLOW: raw_flow6 = flow6
+            entro6 = self.entropy(cost6)
+            # input to context network
+            # including pred flow, entro, left img feat, left img
+            feat6 = torch.cat((flow6.detach(),entro6.detach(),x6,g6),dim=1)
+            flow6 = flow6 + self.context_net6(feat6)*cfg.SCALE_CONTEXT6
         up_flow6 = 2.0*F.interpolate(flow6, [x5.shape[2],x5.shape[3]], mode='bilinear',align_corners=True)
         up_flow6 = up_flow6.detach()
 
          # compute flow for level 5
         warp5,_ = self.warp(y5,up_flow6)
-        cost5 = self.compute_cost(x5,warp5,self.matching2,cfg.SEARCH_RANGE[3],cfg.SEARCH_RANGE[3])
-        # g5 = F.interpolate(images[:,:3,:,:],scale_factor=(1/32), mode='bilinear',align_corners=True)
+        cost5 = self.compute_cost(x5,warp5,self.matching5,cfg.SEARCH_RANGE[3],cfg.SEARCH_RANGE[3])
+        g5 = F.interpolate(images[:,:3,:,:],scale_factor=(1/32), mode='bilinear',align_corners=True)
         if self.dap_layer5 is not None: cost5 = self.dap_layer5(cost5)
         flow5 = self.flow5(cost5) + up_flow6
-        # if cfg.CTF_CONTEXT:
-        #     if cfg.SUP_RAW_FLOW: raw_flow5 = flow5
-        #     entro5 = self.entropy(cost5)
-        #     feat5 = torch.cat((flow5.detach(),entro5.detach(),x5,g5),dim=1) 
-        #     flow5 = flow5 + self.context_net5(feat5)*cfg.SCALE_CONTEXT5
+        if cfg.CTF_CONTEXT:
+            if cfg.SUP_RAW_FLOW: raw_flow5 = flow5
+            entro5 = self.entropy(cost5)
+            feat5 = torch.cat((flow5.detach(),entro5.detach(),x5,g5),dim=1) 
+            flow5 = flow5 + self.context_net5(feat5)*cfg.SCALE_CONTEXT5
         up_flow5 = 2.0*F.interpolate(flow5, [x4.shape[2],x4.shape[3]], mode='bilinear',align_corners=True)
         up_flow5 = up_flow5.detach()
 
          # compute flow for level 4
         warp4,_ = self.warp(y4,up_flow5)
-        cost4 = self.compute_cost(x4,warp4,self.matching2,cfg.SEARCH_RANGE[2],cfg.SEARCH_RANGE[2])
-        # g4 = F.interpolate(images[:,:3,:,:],scale_factor=(1/16), mode='bilinear',align_corners=True)
+        cost4 = self.compute_cost(x4,warp4,self.matching4,cfg.SEARCH_RANGE[2],cfg.SEARCH_RANGE[2])
+        g4 = F.interpolate(images[:,:3,:,:],scale_factor=(1/16), mode='bilinear',align_corners=True)
         if self.dap_layer4 is not None: cost4 = self.dap_layer4(cost4)
         flow4 = self.flow4(cost4) + up_flow5
-        # if cfg.CTF_CONTEXT:
-        #     if cfg.SUP_RAW_FLOW: raw_flow4 = flow4
-        #     entro4 = self.entropy(cost4)
-        #     feat4 = torch.cat((flow4.detach(),entro4.detach(),x4,g4),dim=1) 
-        #     flow4 = flow4 + self.context_net4(feat4)*cfg.SCALE_CONTEXT4
+        if cfg.CTF_CONTEXT:
+            if cfg.SUP_RAW_FLOW: raw_flow4 = flow4
+            entro4 = self.entropy(cost4)
+            feat4 = torch.cat((flow4.detach(),entro4.detach(),x4,g4),dim=1) 
+            flow4 = flow4 + self.context_net4(feat4)*cfg.SCALE_CONTEXT4
         up_flow4 = 2.0*F.interpolate(flow4, [x3.shape[2],x3.shape[3]], mode='bilinear',align_corners=True)
         up_flow4 = up_flow4.detach()
 
          # compute flow for level 3
         warp3,_ = self.warp(y3,up_flow4)
-        cost3 = self.compute_cost(x3,warp3,self.matching2,cfg.SEARCH_RANGE[1],cfg.SEARCH_RANGE[1])
-        # g3 = F.interpolate(images[:,:3,:,:],scale_factor=(1/8), mode='bilinear',align_corners=True)
+        cost3 = self.compute_cost(x3,warp3,self.matching3,cfg.SEARCH_RANGE[1],cfg.SEARCH_RANGE[1])
+        g3 = F.interpolate(images[:,:3,:,:],scale_factor=(1/8), mode='bilinear',align_corners=True)
         if self.dap_layer3 is not None: cost3 = self.dap_layer3(cost3)
         flow3 = self.flow3(cost3) + up_flow4
-        # if cfg.CTF_CONTEXT:
-        #     if cfg.SUP_RAW_FLOW: raw_flow3 = flow3
-        #     entro3 = self.entropy(cost3)
-        #     feat3 = torch.cat((flow3.detach(),entro3.detach(),x3,g3),dim=1) 
-        #     flow3 = flow3 + self.context_net3(feat3)*cfg.SCALE_CONTEXT3
+        if cfg.CTF_CONTEXT:
+            if cfg.SUP_RAW_FLOW: raw_flow3 = flow3
+            entro3 = self.entropy(cost3)
+            feat3 = torch.cat((flow3.detach(),entro3.detach(),x3,g3),dim=1) 
+            flow3 = flow3 + self.context_net3(feat3)*cfg.SCALE_CONTEXT3
         up_flow3 = 2.0*F.interpolate(flow3, [x2.shape[2],x2.shape[3]], mode='bilinear',align_corners=True)
         up_flow3 = up_flow3.detach()
 
@@ -364,8 +338,8 @@ class DICL(nn.Module):
         if self.dap_layer2 is not None: cost2 = self.dap_layer2(cost2)
         flow2 = self.flow2(cost2) + up_flow3
 
-        # if cfg.CTF_CONTEXT or cfg.CTF_CONTEXT_ONLY_FLOW2:
-            # if cfg.SUP_RAW_FLOW: raw_flow2 = flow2
+        if cfg.CTF_CONTEXT or cfg.CTF_CONTEXT_ONLY_FLOW2:
+            if cfg.SUP_RAW_FLOW: raw_flow2 = flow2
         entro2 = self.entropy(cost2)
         feat2 = torch.cat((flow2.detach(),entro2.detach(),x2,g2),dim=1) 
         flow2 = flow2 + self.context_net2(feat2)*cfg.SCALE_CONTEXT2
