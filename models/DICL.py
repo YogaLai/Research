@@ -139,16 +139,11 @@ class DICL(nn.Module):
 
         # matching net, with the same arch at each pyramid level
         # level 6->2:  1/64,1/32,1/16,1/8,1/4
-        # self.matching6 = VecAttn(1, 64, 64//16, 64)
-        # self.matching5 = VecAttn(1, 64, 64//16, 64)
-        # self.matching4 = VecAttn(1, 64, 64//16, 64)
-        # self.matching3 = VecAttn(1, 64, 64//16, 64)
-        # self.matching2 = VecAttn(1, 64, 64//16, 64)
-        self.matching6 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
-        self.matching5 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
-        self.matching4 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
-        self.matching3 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
-        self.matching2 = nn.Sequential(Bottleneck(64), nn.Conv2d(64, 1, kernel_size=1))
+        self.matching6 = DICL_MODULE()
+        self.matching5 = DICL_MODULE()
+        self.matching4 = DICL_MODULE()
+        self.matching3 = DICL_MODULE()
+        self.matching2 = DICL_MODULE()
 
         # search range, e.g., [-3,3]
         # the search range for FlowRegression should be aligned with that when computing matching cost
