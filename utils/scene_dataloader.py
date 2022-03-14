@@ -80,10 +80,14 @@ class myCycleImageFolder(data.Dataset):
         left2 = self.left2[index]
         right2 = self.right2[index]
         param = self.param
-        left_image_1 = Image.open(left1).convert('RGB')
-        right_image_1 = Image.open(right1).convert('RGB')
-        left_image_2 = Image.open(left2).convert('RGB')
-        right_image_2 = Image.open(right2).convert('RGB')
+        try:
+            left_image_1 = Image.open(left1).convert('RGB')
+            right_image_1 = Image.open(right1).convert('RGB')
+            left_image_2 = Image.open(left2).convert('RGB')
+            right_image_2 = Image.open(right2).convert('RGB')
+        except:
+            print('\npil image error: \n', left1)
+            exit()
 
         
         #augmentation
