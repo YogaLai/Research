@@ -172,46 +172,32 @@ class MatchingNet(nn.Module):
             x = self.match(x)
             return x
 
-def DICL_cost(x,y,matching_net, max_disp=3):
-    maxU = maxV = max_disp
-    sizeU = 2*maxU+1
-    sizeV = 2*maxV+1
+def compute_cost(x,y, matchnet, md=4):
+    sizeU = 2*md+1
+    sizeV = 2*md+1
     b,c,height,width = x.shape
 
-    # with torch.cuda.device_of(x):
+    with torch.cuda.device_of(x):
         # init cost as tensor matrix
-    cost = torch.zeros([x.size()[0], 2*c, 2*maxU+1,2*maxV+1, height,  width], device=x.device).requires_grad_(False)
+        cost = x.new().resize_(x.size()[0], 2*c, 2*md+1,2*md+1, height,  width).zero_().requires_grad_(False)
 
+        for i in range(2*md+1):
+            ind = i-md
+            for j in range(2*md+1):
+                indd = j-md
+                # for each displacement hypothesis, we construct a feature map as the input of matching net
+                # here we hold them together for parallel processing later
+                cost[:,:c,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = x[:,:,max(0,-indd):height-indd,max(0,-ind):width-ind]
+                cost[:,c:,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = y[:,:,max(0,+indd):height+indd,max(0,ind):width+ind]
 
-    # if cfg.CUDA_COST:
-    #     # CUDA acceleration
-    #     corr = SpatialCorrelationSampler(kernel_size=1,patch_size=(int(1+2*3),int(1+2*3)),stride=1,padding=0,dilation_patch=1)
-    #     cost = corr(x, y)
-    # else:
-    for i in range(2*maxU+1):
-        ind = i-maxU
-        for j in range(2*maxV+1):
-            indd = j-maxV
-            # for each displacement hypothesis, we construct a feature map as the input of matching net
-            # here we hold them together for parallel processing later
-            cost[:,:c,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = x[:,:,max(0,-indd):height-indd,max(0,-ind):width-ind]
-            cost[:,c:,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = y[:,:,max(0,+indd):height+indd,max(0,ind):width+ind]
+        # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
+        cost = cost.permute([0,2,3,1,4,5]).contiguous() 
+        # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+        cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
+        cost = matchnet(cost)
+        # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+        cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
+        cost = cost.permute([0,3,1,2,4,5]).contiguous() 
 
-    # if cfg.REMOVE_WARP_HOLE:
-    #     # mitigate the effect of holes (may be raised by occ)
-    #     valid_mask = cost[:,c:,...].sum(dim=1)!=0
-    #     valid_mask = valid_mask.detach()
-    #     cost = cost*valid_mask.unsqueeze(1).float()
-
-    # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
-    cost = cost.permute([0,2,3,1,4,5]).contiguous() 
-    # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
-    cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
-    # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
-    cost = matching_net(cost)
-    # cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
-    # cost = cost.permute([0,3,1,2,4,5]).contiguous() 
-    cost = cost.view(x.size(0), sizeU*sizeV, x.size(2), x.size(3)).contiguous()
-
-    # (B, U, V, H, W)
-    return cost
+        # (B, U, V, H, W)
+        return cost
