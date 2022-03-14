@@ -195,7 +195,10 @@ class DICL(nn.Module):
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d)) or isinstance(m, nn.ConvTranspose2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight.data, mode='fan_in')
+                if m.bias is not None:
+                    m.bias.data.zero_()
             elif isinstance(m, (nn.BatchNorm2d)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -259,6 +262,8 @@ class DICL(nn.Module):
         # left and right images normalized
         x = images[:,:3,:,:]
         y = images[:,3:,:,:]
+        x = (x-0.5)/0.5
+        y = (y-0.5)/0.5
         h,w = images.shape[2], images.shape[3]
         
         # feature extraction
@@ -564,11 +569,11 @@ class FeatureGA(nn.Module):
         # feature backbone
         # adopted from GANet (https://github.com/feihuzhang/GANet)
         self.conv_start = nn.Sequential(
-            BasicConv(3, 32, kernel_size=3, padding=1),
-            BasicConv(32, 32, kernel_size=3, stride=2, padding=1),
-            BasicConv(32, 32, kernel_size=3, padding=1))
-        self.conv1a = BasicConv(32, 48, kernel_size=3, stride=2, padding=1)
-        self.conv2a = BasicConv(48, 64, kernel_size=3, stride=2, padding=1)
+            BasicConv(3, 16, kernel_size=3, padding=1),
+            BasicConv(16, 16, kernel_size=3, stride=2, padding=1),
+            BasicConv(16, 16, kernel_size=3, padding=1))
+        self.conv1a = BasicConv(16, 32, kernel_size=3, stride=2, padding=1)
+        self.conv2a = BasicConv(32, 64, kernel_size=3, stride=2, padding=1)
         self.conv3a = BasicConv(64, 96, kernel_size=3, stride=2, padding=1)
         self.conv4a = BasicConv(96, 128, kernel_size=3, stride=2, padding=1)
         self.conv5a = BasicConv(128, 160, kernel_size=3, stride=2, padding=1)
@@ -578,11 +583,11 @@ class FeatureGA(nn.Module):
         self.deconv5a = Conv2x(160, 128, deconv=True)
         self.deconv4a = Conv2x(128, 96, deconv=True)
         self.deconv3a = Conv2x(96, 64, deconv=True)
-        self.deconv2a = Conv2x(64, 48, deconv=True)
-        self.deconv1a = Conv2x(48, 32, deconv=True)
+        self.deconv2a = Conv2x(64, 32, deconv=True)
+        self.deconv1a = Conv2x(32, 16, deconv=True)
 
-        self.conv1b = Conv2x(32, 48)
-        self.conv2b = Conv2x(48, 64)
+        self.conv1b = Conv2x(16, 32)
+        self.conv2b = Conv2x(32, 64)
         self.conv3b = Conv2x(64, 96)
         self.conv4b = Conv2x(96, 128)
         self.conv5b = Conv2x(128, 160)
@@ -600,8 +605,8 @@ class FeatureGA(nn.Module):
         self.deconv3b = Conv2x(96, 64, deconv=True)
         self.outconv_3 = BasicConv(64, 32, kernel_size=3,  padding=1)
 
-        self.deconv2b = Conv2x(64, 48, deconv=True)
-        self.outconv_2 = BasicConv(48, 32, kernel_size=3,  padding=1)
+        self.deconv2b = Conv2x(64, 32, deconv=True)
+        self.outconv_2 = BasicConv(32, 32, kernel_size=3,  padding=1)
 
 
     def forward(self, x):
