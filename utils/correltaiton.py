@@ -172,14 +172,14 @@ class MatchingNet(nn.Module):
             x = self.match(x)
             return x
 
-def compute_cost(x,y, matchnet, md=4):
+def compute_cost(x,y, matchnet, md=3):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape
 
     with torch.cuda.device_of(x):
         # init cost as tensor matrix
-        cost = x.new().resize_(x.size()[0], 2*c, 2*md+1,2*md+1, height,  width).zero_().requires_grad_(False)
+        cost = x.new().resize_(x.size()[0], 2*c, 2*md+1,2*md+1, height,  width).zero_()
 
         for i in range(2*md+1):
             ind = i-md
