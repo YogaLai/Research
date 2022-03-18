@@ -175,7 +175,7 @@ class MatchingNet(nn.Module):
 class MatchingNetSmall(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
     def __init__(self):
-        super(MatchingNet, self).__init__()
+        super(MatchingNetSmall, self).__init__()
         self.match = nn.Sequential(
                         BasicConv(32, 48, kernel_size=3, padding=1,   dilation=1),
                         BasicConv(48, 96, kernel_size=3, stride=2,    padding=1),   # down by 1/2
