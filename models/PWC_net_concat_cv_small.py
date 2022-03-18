@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os.path
 
-from utils.correltaiton import MatchingNet, compute_cost
+from utils.correltaiton import MatchingNetSmall, compute_cost
 from .Dual_attention import DualAttention
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
@@ -76,11 +76,11 @@ class PWCDCNet(nn.Module):
         self.conv_out4 = myconv(96, 16)
         self.conv_out5 = myconv(128, 16)
         self.conv_out6 = myconv(196, 16)
-        self.matchnet2 = MatchingNet()
-        self.matchnet3 = MatchingNet()
-        self.matchnet4 = MatchingNet()
-        self.matchnet5 = MatchingNet()
-        self.matchnet6 = MatchingNet()
+        self.matchnet2 = MatchingNetSmall()
+        self.matchnet3 = MatchingNetSmall()
+        self.matchnet4 = MatchingNetSmall()
+        self.matchnet5 = MatchingNetSmall()
+        self.matchnet6 = MatchingNetSmall()
         self.dap6 = DAP(md=md)
         self.dap5 = DAP(md=md)
         self.dap4 = DAP(md=md)
