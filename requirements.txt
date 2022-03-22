@@ -1,0 +1,7 @@
+matplotlib
+opencv-python
+easydict
+pyyml
+cupy-cuda101
+tensorboard
+tqdm
