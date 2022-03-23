@@ -172,14 +172,54 @@ class MatchingNet(nn.Module):
             x = self.match(x)
             return x
 
-def compute_cost(x,y, matchnet, md=4):
+class MatchingNetSmall(nn.Module):
+    # Matching net with 2D conv as mentioned in the paper
+    def __init__(self):
+        super(MatchingNetSmall, self).__init__()
+        self.match = nn.Sequential(
+                        BasicConv(32, 48, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(48, 96, kernel_size=3, stride=2,    padding=1),   # down by 1/2
+                        BasicConv(96, 96, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(96, 48, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                        nn.Conv2d(32, 1  , kernel_size=3, stride=1, padding=1, bias=True),
+                    )
+
+    def forward(self, x):
+            x = self.match(x)
+            return x
+
+class MatchingNetSmallAttn(nn.Module):
+    # Matching net with 2D conv as mentioned in the paper
+    def __init__(self, attention_list):
+        super(MatchingNetSmallAttn, self).__init__()
+        self.match = nn.Sequential(
+                        BasicConv(32, 48, kernel_size=3, padding=1,   dilation=1),
+                        attention_list[0],
+                        BasicConv(48, 96, kernel_size=3, stride=2,    padding=1),   # down by 1/2
+                        attention_list[1],
+                        BasicConv(96, 96, kernel_size=3, padding=1,   dilation=1),
+                        attention_list[2],
+                        BasicConv(96, 48, kernel_size=3, padding=1,   dilation=1),
+                        attention_list[3],
+                        BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                        attention_list[4],
+                        nn.Conv2d(32, 1  , kernel_size=3, stride=1, padding=1, bias=True),
+                    )
+
+    def forward(self, x):
+            x = self.match(x)
+            return x
+
+
+def compute_cost(x,y, matchnet, md=3):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape
 
     with torch.cuda.device_of(x):
         # init cost as tensor matrix
-        cost = x.new().resize_(x.size()[0], 2*c, 2*md+1,2*md+1, height,  width).zero_().requires_grad_(False)
+        cost = x.new().resize_(x.size()[0], 2*c, 2*md+1,2*md+1, height,  width).zero_()
 
         for i in range(2*md+1):
             ind = i-md
