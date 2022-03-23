@@ -42,11 +42,31 @@ class DAP(nn.Module):
 
         return x.view(bs,du*dv,h,w) 
 
+class AttnDAP(nn.Module):
+    def __init__(self, md=4):
+        # Displacement-aware projection layer
+        # implemented as a 1x1 2D conv
+        super(AttnDAP, self).__init__()
+        in_channels = (2*md+1)**2
+        reduction_ratio = 2*md+1
+        self.global_avg_pooling = nn.AdaptiveAvgPool2d(1)
+        self.ca_conv1 = nn.Conv2d(in_channels, in_channels//reduction_ratio, 1)
+        self.ca_conv2 = nn.Conv2d(in_channels//reduction_ratio, in_channels, 1)
+    def forward(self, x):
+        x = x.squeeze(1)
+        bs,du,dv,h,w = x.shape
+        x = x.view(bs,du*dv,h,w)
+        ca = self.global_avg_pooling(x)
+        ca = self.ca_conv1(ca)
+        ca = self.ca_conv2(ca)
+        x = x * ca
+        return x
+
 class PWCDCNet(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
     """
-    def __init__(self, md=3, attn_match=False):
+    def __init__(self, md=3, attn_match=False, attn_dap=False):
         """
         input: md --- maximum displacement (for correlation. default: 4), after warpping
         """
@@ -95,11 +115,20 @@ class PWCDCNet(nn.Module):
             self.matchnet4 = MatchingNetSmall()
             self.matchnet5 = MatchingNetSmall()
             self.matchnet6 = MatchingNetSmall()
-        self.dap6 = DAP(md=md)
-        self.dap5 = DAP(md=md)
-        self.dap4 = DAP(md=md)
-        self.dap3 = DAP(md=md)
-        self.dap2 = DAP(md=md)
+
+        if attn_dap:
+            self.dap6 = AttnDAP(md=md)
+            self.dap5 = AttnDAP(md=md)
+            self.dap4 = AttnDAP(md=md)
+            self.dap3 = AttnDAP(md=md)
+            self.dap2 = AttnDAP(md=md)
+
+        else:
+            self.dap6 = DAP(md=md)
+            self.dap5 = DAP(md=md)
+            self.dap4 = DAP(md=md)
+            self.dap3 = DAP(md=md)
+            self.dap2 = DAP(md=md)
 
         self.leakyRELU = nn.LeakyReLU(0.1)
         
