@@ -10,7 +10,7 @@ from .Dual_attention import DualAttention
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
 # from .networks.correlation_package.correlation import Correlation
-from networks.correlation_package.correlation import Correlation
+# from networks.correlation_package.correlation import Correlation
 
 __all__ = [
     'pwc_dc_net'
