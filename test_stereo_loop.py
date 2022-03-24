@@ -1,7 +1,4 @@
 import torch
-import torchvision
-import torchvision.transforms as transforms
-import torch.utils.data as data
 import numpy as np
 from torch.autograd import Variable
 import torch.nn as nn
@@ -11,19 +8,20 @@ import argparse
 import random
 from PIL import Image
 import matplotlib.pyplot as plt
-import cv2
-from models.MonodepthModel import *
-# from models.PWC_net_small_sparse import *
+from models.PWC_net_concat_cv import *
+# from models.PWC_net_attn_bigger import *
 # from models.PWC_net_small_attn import *
-from models.PWC_net_small import *
 from utils.scene_dataloader import *
 from utils.utils import *
 # from models.RT_stereov4 import HRstereoNet
+from collections import OrderedDict
+from models.DICL import dicl_wrapper
+from config import cfg_from_file
 
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--split',                     type=str,   help='validation set', default='kitti')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
@@ -46,11 +44,11 @@ if args.model_name == 'monodepth':
     net = MonodepthNet()
 elif args.model_name == 'pwc':
     net = pwc_dc_net()
-    args.input_width = 832 
-elif args.model_name == 'realtime_stereo':
-    net = HRstereoNet(maxdisp=192)
-    net = nn.DataParallel(net)
-    args.input_width = 832
+    args.input_width = 768
+elif args.model_name == 'dicl':
+    cfg_from_file('cfgs/dicl5_kitti.yml')
+    net = dicl_wrapper()
+    args.input_width = 768
    
 if args.cuda:
     net = net.cuda()
@@ -72,7 +70,15 @@ ckt_dict = sorted(ckt_dict.items(), key=lambda x: int(x[0])) # sort by key
 for epoch, ckt in ckt_dict:
     print('epoch: ', epoch)
     checkpoint = torch.load(ckt)
-    net.load_state_dict(checkpoint['state_dict'])
+    # if any("abc" in s for s in some_list):
+    if any('module' in s for s in checkpoint['state_dict'].keys()):
+        state_dict = OrderedDict()
+        for k, v in checkpoint['state_dict'].items():
+            name = k[7:] # remove `module.`
+            state_dict[name] = v
+    else:
+        state_dict = checkpoint['state_dict']
+    net.load_state_dict(state_dict)
     net.eval()
 
     if args.split == 'kitti':
@@ -81,17 +87,6 @@ for epoch, ckt in ckt_dict:
         disparities = np.zeros((697, args.input_height, args.input_width), dtype=np.float32)
 
     for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
-        if args.model_name == 'realtime_stereo':
-            normal_mean_var = {'mean': [0.485, 0.456, 0.406],
-                                'std': [0.229, 0.224, 0.225]}
-            normalize = transforms.Normalize(**normal_mean_var)
-            left, right = normalize(left[0]).unsqueeze(0), normalize(right[0]).unsqueeze(0)
-            if args.cuda:
-                left, right = left.cuda(), right.cuda()
-            disp_est = net(left, right)[0] / 832
-            disparities[batch_idx] = disp_est.data.cpu().numpy()
-            continue
-    
         left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
         right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
         
@@ -99,16 +94,8 @@ for epoch, ckt in ckt_dict:
         if args.cuda:
             model_input = model_input.cuda()
 
-        if args.model_name == 'monodepth':
-            disp_est_scale, disp_est= net(model_input)
-        elif args.model_name == 'pwc':
-            disp_est_scale = net(model_input)
-            disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3], disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
-        
-        # pred_disp = (pred_disp*256).astype('uint16')
-        # img = Image.fromarray(pred_disp)
-        # img.save(f'visualization/evaluate/realtime_stereo/{batch_idx}.png')
-        # plt.imsave(f'visualization/evaluate/{batch_idx}.png', pred_disp, cmap='jet')
+        disp_est_scale = net(model_input)
+        disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3], disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
 
         disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
     print('done')
