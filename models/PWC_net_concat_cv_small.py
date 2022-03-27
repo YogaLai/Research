@@ -52,6 +52,7 @@ class AttnDAP(nn.Module):
         self.global_avg_pooling = nn.AdaptiveAvgPool2d(1)
         self.ca_conv1 = nn.Conv2d(in_channels, in_channels//reduction_ratio, 1)
         self.ca_conv2 = nn.Conv2d(in_channels//reduction_ratio, in_channels, 1)
+        self.sigmoid = nn.Sigmoid()
     def forward(self, x):
         x = x.squeeze(1)
         bs,du,dv,h,w = x.shape
@@ -59,6 +60,7 @@ class AttnDAP(nn.Module):
         ca = self.global_avg_pooling(x)
         ca = self.ca_conv1(ca)
         ca = self.ca_conv2(ca)
+        ca = self.sigmoid(ca)
         x = x * ca
         return x
 
