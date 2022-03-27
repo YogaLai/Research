@@ -23,6 +23,17 @@ def compute_errors(gt, pred):
 
     return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
 
+def compute_epe(epe_map, mask, noc_mask):
+    """
+    mask is disp_occ > 0
+    """
+    epe_all = np.sum(epe_map*mask)/np.sum(mask)
+    epe_noc = np.sum(epe_map*noc_mask)/np.sum(noc_mask)
+    idx = (mask.astype(np.uint8)-(noc_mask).astype(np.uint8))
+    epe_occ = np.sum(epe_map*idx) / max(np.sum(idx), 1.0)
+
+    return epe_all, epe_noc, epe_occ
+
 ###############################################################################
 #######################  KITTI
 
@@ -32,12 +43,24 @@ width_to_focal[1241] = 718.856
 width_to_focal[1224] = 707.0493
 width_to_focal[1238] = 718.3351
 
-def load_gt_disp_kitti(path):
+def load_gt_disp_kitti(path, occ_type='occ'):
     gt_disparities = []
-    for i in range(200):
-        disp = cv2.imread(path + "/disp_occ_0/" + str(i).zfill(6) + "_10.png", -1)
-        disp = disp.astype(np.float32) / 256
-        gt_disparities.append(disp)
+    if occ_type!='occ' and occ_type!='noc' and occ_type!='all':
+        raise BaseException('The occ type must be occ/noc/all')
+    if occ_type == 'occ' or occ_type == 'noc':
+        for i in range(200):
+            disp = cv2.imread(path + "/disp_" + occ_type + "_0/" + str(i).zfill(6) + "_10.png", -1)
+            disp = disp.astype(np.float32) / 256
+            gt_disparities.append(disp)
+    # else:
+    #     for i in range(200):
+    #         disp = cv2.imread(path + "/disp_occ_0/" + str(i).zfill(6) + "_10.png", -1)
+    #         disp = disp.astype(np.float32) / 256
+    #         gt_disparities.append(disp)
+    #     for i in range(200):
+    #         disp = cv2.imread(path + "/disp_noc_0/" + str(i).zfill(6) + "_10.png", -1)
+    #         disp = disp.astype(np.float32) / 256
+    #         gt_disparities.append(disp)
     return gt_disparities
 
 def convert_disps_to_depths_kitti(gt_disparities, pred_disparities):
