@@ -10,7 +10,7 @@ from .Dual_attention import DualAttention
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
 # from .networks.correlation_package.correlation import Correlation
-from networks.correlation_package.correlation import Correlation
+# from networks.correlation_package.correlation import Correlation
 
 __all__ = [
     'pwc_dc_net'
@@ -68,7 +68,7 @@ class PWCDCNet(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
     """
-    def __init__(self, md=3, attn_match=False, attn_dap=False):
+    def __init__(self, md=3, attn_match=False, attn_dap=False, dcn=False):
         """
         input: md --- maximum displacement (for correlation. default: 4), after warpping
         """
@@ -112,11 +112,11 @@ class PWCDCNet(nn.Module):
             self.matchnet5 = MatchingNetSmallAttn(attention_list)
             self.matchnet6 = MatchingNetSmallAttn(attention_list)
         else:
-            self.matchnet2 = MatchingNetSmall()
-            self.matchnet3 = MatchingNetSmall()
-            self.matchnet4 = MatchingNetSmall()
-            self.matchnet5 = MatchingNetSmall()
-            self.matchnet6 = MatchingNetSmall()
+            self.matchnet2 = MatchingNetSmall(dcn=dcn)
+            self.matchnet3 = MatchingNetSmall(dcn=dcn)
+            self.matchnet4 = MatchingNetSmall(dcn=dcn)
+            self.matchnet5 = MatchingNetSmall(dcn=dcn)
+            self.matchnet6 = MatchingNetSmall(dcn=dcn)
 
         if attn_dap:
             self.dap6 = AttnDAP(md=md)
