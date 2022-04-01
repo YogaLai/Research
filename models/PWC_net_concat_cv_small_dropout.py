@@ -64,6 +64,47 @@ class AttnDAP(nn.Module):
         x = x * ca
         return x
 
+class BasicConv(nn.Module):
+    def __init__(self, in_channels, out_channels, deconv=False, bn=True, relu=True, dcn=False, **kwargs):
+        super(BasicConv, self).__init__()
+        self.relu = relu
+        self.use_bn = bn
+        if self.use_bn: self.bn = nn.BatchNorm2d(out_channels)
+        if deconv:
+            self.conv = nn.ConvTranspose2d(in_channels, out_channels, bias=False, **kwargs)
+        else:
+            self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        
+    def forward(self, x):
+        x = self.conv(x)
+        if self.use_bn:
+            x = self.bn(x)
+        if self.relu:
+            x = torch.nn.functional.relu(x, inplace=True)
+        return x
+
+class MatchingSmallWithDropout(nn.Module):
+    # Matching net with 2D conv as mentioned in the paper
+    def __init__(self, dcn=False):
+        super(MatchingSmallWithDropout, self).__init__()
+        self.match = nn.Sequential(
+                        BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
+                        nn.Dropout(),
+                        BasicConv(48, 96, kernel_size=3, padding=1, stride=2, dcn=dcn),   # down by 1/2
+                        nn.Dropout(),
+                        BasicConv(96, 96, kernel_size=3, padding=1, dcn=dcn),
+                        nn.Dropout(),
+                        BasicConv(96, 48, kernel_size=3, padding=1, dcn=dcn),
+                        nn.Dropout(),
+                        BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                        nn.Dropout(),
+                        nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
+                    )
+
+    def forward(self, x):
+            x = self.match(x)
+            return x
+
 class PWCDCNet(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
@@ -112,11 +153,11 @@ class PWCDCNet(nn.Module):
             self.matchnet5 = MatchingNetSmallAttn(attention_list)
             self.matchnet6 = MatchingNetSmallAttn(attention_list)
         else:
-            self.matchnet2 = MatchingNetSmall(dcn=dcn)
-            self.matchnet3 = MatchingNetSmall(dcn=dcn)
-            self.matchnet4 = MatchingNetSmall(dcn=dcn)
-            self.matchnet5 = MatchingNetSmall(dcn=dcn)
-            self.matchnet6 = MatchingNetSmall(dcn=dcn)
+            self.matchnet2 = MatchingSmallWithDropout(dcn=dcn)
+            self.matchnet3 = MatchingSmallWithDropout(dcn=dcn)
+            self.matchnet4 = MatchingSmallWithDropout(dcn=dcn)
+            self.matchnet5 = MatchingSmallWithDropout(dcn=dcn)
+            self.matchnet6 = MatchingSmallWithDropout(dcn=dcn)
 
         if attn_dap:
             self.dap6 = AttnDAP(md=md)

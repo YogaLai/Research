@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from networks.correlation_package.correlation import Correlation
+from models.lib.dcn import DeformableConv2d
+# from networks.correlation_package.correlation import Correlation
 
 class MyCorrelation(nn.Module):
     def __init__(self, d=4):
@@ -16,25 +17,6 @@ class MyCorrelation(nn.Module):
                 cv.append(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
         
         return torch.cat(cv, axis=1)
-
-class BasicConv(nn.Module):
-    def __init__(self, in_channels, out_channels, deconv=False, bn=True, relu=True, **kwargs):
-        super(BasicConv, self).__init__()
-        self.relu = relu
-        self.use_bn = bn
-        if self.use_bn: self.bn = nn.BatchNorm2d(out_channels)
-        if deconv:
-            self.conv = nn.ConvTranspose2d(in_channels, out_channels, bias=False, **kwargs)
-        else:
-            self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
-        
-    def forward(self, x):
-        x = self.conv(x)
-        if self.use_bn:
-            x = self.bn(x)
-        if self.relu:
-            x = F.relu(x, inplace=True)
-        return x
 
 class GwcCorrelation(nn.Module):
     def __init__(self, d=4, n_groups=16):
@@ -137,7 +119,7 @@ def split_correlation(feat1, feat2, direction, d=4 ):
 # print(time.time() - since)
 
 class BasicConv(nn.Module):
-    def __init__(self, in_channels, out_channels, deconv=False, bn=True, relu=True, **kwargs):
+    def __init__(self, in_channels, out_channels, deconv=False, bn=True, relu=True, dcn=False, **kwargs):
         super(BasicConv, self).__init__()
         self.relu = relu
         self.use_bn = bn
@@ -145,7 +127,10 @@ class BasicConv(nn.Module):
         if deconv:
             self.conv = nn.ConvTranspose2d(in_channels, out_channels, bias=False, **kwargs)
         else:
-            self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+            if dcn:
+                self.conv = DeformableConv2d(in_channels, out_channels, **kwargs)
+            else:
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         
     def forward(self, x):
         x = self.conv(x)
@@ -160,12 +145,12 @@ class MatchingNet(nn.Module):
     def __init__(self):
         super(MatchingNet, self).__init__()
         self.match = nn.Sequential(
-                        BasicConv(64, 96, kernel_size=3, padding=1,   dilation=1),
-                        BasicConv(96, 128, kernel_size=3, stride=2,    padding=1),   # down by 1/2
-                        BasicConv(128, 128, kernel_size=3, padding=1,   dilation=1),
-                        BasicConv(128, 64, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(64, 96, kernel_size=3, padding=1),
+                        BasicConv(96, 128, kernel_size=3, padding=1, stride=2),   # down by 1/2
+                        BasicConv(128, 128, kernel_size=3, padding=1),
+                        BasicConv(128, 64, kernel_size=3, padding=1),
                         BasicConv(64, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
-                        nn.Conv2d(32, 1  , kernel_size=3, stride=1, padding=1, bias=True),
+                        nn.Conv2d(32, 1, kernel_size=3, padding=1, bias=True),
                     )
 
     def forward(self, x):
@@ -174,15 +159,15 @@ class MatchingNet(nn.Module):
 
 class MatchingNetSmall(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
-    def __init__(self):
+    def __init__(self, dcn=False):
         super(MatchingNetSmall, self).__init__()
         self.match = nn.Sequential(
-                        BasicConv(32, 48, kernel_size=3, padding=1,   dilation=1),
-                        BasicConv(48, 96, kernel_size=3, stride=2,    padding=1),   # down by 1/2
-                        BasicConv(96, 96, kernel_size=3, padding=1,   dilation=1),
-                        BasicConv(96, 48, kernel_size=3, padding=1,   dilation=1),
+                        BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
+                        BasicConv(48, 96, kernel_size=3, padding=1, stride=2, dcn=dcn),   # down by 1/2
+                        BasicConv(96, 96, kernel_size=3, padding=1, dcn=dcn),
+                        BasicConv(96, 48, kernel_size=3, padding=1, dcn=dcn),
                         BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
-                        nn.Conv2d(32, 1  , kernel_size=3, stride=1, padding=1, bias=True),
+                        nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
                     )
 
     def forward(self, x):
