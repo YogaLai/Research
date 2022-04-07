@@ -40,6 +40,21 @@ def get_data(file_path_test, path):
         
     return left_image_test, right_image_test
 
+def get_middleburry_data(path, is_perfect=True):
+    if is_perfect:
+        path = os.path.join(path, 'perfect')
+    else:
+        path = os.path.join(path, 'imperfect')
+
+    left = []
+    right = []
+    for subdir in os.listdir(path):
+        scene = os.path.join(path, subdir)
+        left.append(os.path.join(scene, 'im0.png'))
+        right.append(os.path.join(scene, 'im1.png'))
+    
+    return left, right
+
 def get_flow_data(file_path_test, path):
     f_test = open(file_path_test)
     flow_test = list()
@@ -162,8 +177,13 @@ class myImageFolder(data.Dataset):
         left = self.left[index]
         right = self.right[index]
         param = self.param
-        left_image = Image.open(left).convert('RGB')
-        right_image = Image.open(right).convert('RGB')
+        try:
+            left_image = Image.open(left).convert('RGB')
+            right_image = Image.open(right).convert('RGB')
+        except:
+            print('Erro open PNG: ', left)
+            print('Erro open PNG: ', right)
+            exit()
       
         process = get_transform(param, self.resize)
         left_image = process(left_image)
