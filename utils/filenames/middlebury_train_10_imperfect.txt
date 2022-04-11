@@ -1,0 +1,10 @@
+Adirondack-imperfect/im0.png Adirondack-imperfect/im1.png
+Jadeplant-imperfect/im0.png Jadeplant-imperfect/im1.png
+Motorcycle-imperfect/im0.png Motorcycle-imperfect/im1.png
+Piano-imperfect/im0.png Piano-imperfect/im1.png
+Pipes-imperfect/im0.png Pipes-imperfect/im1.png 
+Playroom-imperfect/im0.png Playroom-imperfect/im1.png
+Playtable-imperfect/im0.png Playtable-imperfect/im1.png
+Recycle-imperfect/im0.png Recycle-imperfect/im1.png
+Shelves-imperfect/im0.png Shelves-imperfect/im1.png
+Vintage-imperfect/im0.png Vintage-imperfect/im1.png
