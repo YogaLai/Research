@@ -96,19 +96,10 @@ class myCycleImageFolder(data.Dataset):
         right2 = self.right2[index]
         param = self.param
         try:
-            left_image_1 = cv2.imread(left1)
-            left_image_1 = cv2.cvtColor(left_image_1, cv2.COLOR_BGR2RGB)
-            right_image_1 = cv2.imread(right1)
-            right_image_1 = cv2.cvtColor(right_image_1, cv2.COLOR_BGR2RGB)
-            left_image_2 = cv2.imread(left2)
-            left_image_2 = cv2.cvtColor(left_image_2, cv2.COLOR_BGR2RGB)
-            right_image_2 = cv2.imread(right2)
-            right_image_2 = cv2.cvtColor(right_image_2, cv2.COLOR_BGR2RGB)
-
-            left_image_1 = Image.fromarray(left_image_1)
-            right_image_1 = Image.fromarray(right_image_1)
-            left_image_2 = Image.fromarray(left_image_2)
-            right_image_2 = Image.fromarray(right_image_2)
+            left_image_1 = Image.open(left1).convert('RGB')
+            right_image_1 = Image.open(right1).convert('RGB')
+            left_image_2 = Image.open(left2).convert('RGB')
+            right_image_2 = Image.open(right2).convert('RGB')
 
         except:
             print('\read image error: \n', left1)
