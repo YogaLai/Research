@@ -177,7 +177,7 @@ class MatchingNetSmall(nn.Module):
 class MatchingNetDeep(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
     def __init__(self, dcn=False):
-        super(MatchingNetSmall, self).__init__()
+        super(MatchingNetDeep, self).__init__()
         self.match = nn.Sequential(
                         BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
                         BasicConv(48, 96, kernel_size=3, padding=1, stride=2, dcn=dcn),   # down by 1/2
@@ -215,7 +215,7 @@ class MatchingNetSmallAttn(nn.Module):
             return x
 
 
-def compute_cost(x,y, matchnet, md=3):
+def compute_cost(x,y, matchnet, md=4):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape
