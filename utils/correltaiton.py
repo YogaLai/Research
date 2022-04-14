@@ -137,7 +137,7 @@ class BasicConv(nn.Module):
         if self.use_bn:
             x = self.bn(x)
         if self.relu:
-            x = torch.nn.functional.relu(x, inplace=True)
+            x = torch.nn.functional.leaky_relu(x, inplace=True)
         return x
 
 class MatchingNet(nn.Module):
@@ -215,7 +215,7 @@ class MatchingNetSmallAttn(nn.Module):
             return x
 
 
-def compute_cost(x,y, matchnet, md=3):
+def compute_cost(x,y, matchnet, md=4):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape
@@ -240,6 +240,36 @@ def compute_cost(x,y, matchnet, md=3):
         cost = matchnet(cost)
         # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
         cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
+        cost = cost.permute([0,3,1,2,4,5]).contiguous() 
+
+        # (B, U, V, H, W)
+        return cost
+
+def compute_stereo_cost(x,y, matchnet, md=8):
+    sizeU = 2*md+1
+    sizeV = 2*1+1
+    b,c,height,width = x.shape
+
+    with torch.cuda.device_of(x):
+        # init cost as tensor matrix
+        cost = x.new().resize_(x.size()[0], 2*c, sizeU, sizeV, height, width).zero_()
+
+        for i in range(sizeU):
+            ind = i-md
+            for j in range(sizeV):
+                indd = j-1
+                # for each displacement hypothesis, we construct a feature map as the input of matching net
+                # here we hold them together for parallel processing later
+                cost[:,:c,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = x[:,:,max(0,-indd):height-indd,max(0,-ind):width-ind]
+                cost[:,c:,i,j,max(0,-indd):height-indd,max(0,-ind):width-ind] = y[:,:,max(0,+indd):height+indd,max(0,ind):width+ind]
+
+        # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
+        cost = cost.permute([0,2,3,1,4,5]).contiguous() 
+        # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+        cost = cost.view(x.size()[0]*sizeU*sizeV, c*2, x.size()[2], x.size()[3])
+        cost = matchnet(cost)
+        # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+        cost = cost.view(x.size()[0], sizeU, sizeV,1, x.size()[2], x.size()[3])
         cost = cost.permute([0,3,1,2,4,5]).contiguous() 
 
         # (B, U, V, H, W)
