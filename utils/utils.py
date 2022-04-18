@@ -1,4 +1,4 @@
-from Forward_Warp.forward_warp import forward_warp
+# from Forward_Warp.forward_warp import forward_warp
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -13,7 +13,7 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
-from networks.resample2d_package.resample2d import Resample2d
+# from networks.resample2d_package.resample2d import Resample2d
 import time
 
 def gradient_x(img):
@@ -130,6 +130,34 @@ def get_mask(forward, backward, border_mask):
     
     flow_bw_warped = Resample2d()(flow_bw, flow_fw)
     flow_fw_warped = Resample2d()(flow_fw, flow_bw)
+    flow_diff_fw = flow_fw + flow_bw_warped
+    flow_diff_bw = flow_bw + flow_fw_warped
+    occ_thresh =  0.01 * mag_sq + 0.5
+    # fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).type(torch.cuda.FloatTensor)
+    # fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).type(torch.cuda.FloatTensor)
+    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
+    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
+    
+    if border_mask is None:
+        mask_fw = create_outgoing_mask(flow_fw)
+        mask_bw = create_outgoing_mask(flow_bw)
+    else:
+        mask_fw = border_mask
+        mask_bw = border_mask
+    # print(mask_fw.device)
+    # print(fb_occ_bw.device)
+    fw = mask_fw * (1 - fb_occ_fw)
+    bw = mask_bw * (1 - fb_occ_bw)
+
+    return fw, bw, flow_diff_fw, flow_diff_bw
+
+def get_mask_wo_resample(forward, backward, border_mask):
+    flow_fw = forward
+    flow_bw = backward
+    mag_sq = length_sq(flow_fw) + length_sq(flow_bw)
+    
+    flow_bw_warped = flow_warp(flow_bw, flow_fw)
+    flow_fw_warped = flow_warp(flow_fw, flow_bw)
     flow_diff_fw = flow_fw + flow_bw_warped
     flow_diff_bw = flow_bw + flow_fw_warped
     occ_thresh =  0.01 * mag_sq + 0.5
