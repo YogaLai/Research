@@ -1,4 +1,4 @@
-from Forward_Warp.forward_warp import forward_warp
+from matplotlib.lines import Line2D
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -130,6 +130,34 @@ def get_mask(forward, backward, border_mask):
     
     flow_bw_warped = Resample2d()(flow_bw, flow_fw)
     flow_fw_warped = Resample2d()(flow_fw, flow_bw)
+    flow_diff_fw = flow_fw + flow_bw_warped
+    flow_diff_bw = flow_bw + flow_fw_warped
+    occ_thresh =  0.01 * mag_sq + 0.5
+    # fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).type(torch.cuda.FloatTensor)
+    # fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).type(torch.cuda.FloatTensor)
+    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
+    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
+    
+    if border_mask is None:
+        mask_fw = create_outgoing_mask(flow_fw)
+        mask_bw = create_outgoing_mask(flow_bw)
+    else:
+        mask_fw = border_mask
+        mask_bw = border_mask
+    # print(mask_fw.device)
+    # print(fb_occ_bw.device)
+    fw = mask_fw * (1 - fb_occ_fw)
+    bw = mask_bw * (1 - fb_occ_bw)
+
+    return fw, bw, flow_diff_fw, flow_diff_bw
+
+def get_mask_wo_resample(forward, backward, border_mask):
+    flow_fw = forward
+    flow_bw = backward
+    mag_sq = length_sq(flow_fw) + length_sq(flow_bw)
+    
+    flow_bw_warped = flow_warp(flow_bw, flow_fw)
+    flow_fw_warped = flow_warp(flow_fw, flow_bw)
     flow_diff_fw = flow_fw + flow_bw_warped
     flow_diff_bw = flow_bw + flow_fw_warped
     occ_thresh =  0.01 * mag_sq + 0.5
@@ -293,9 +321,27 @@ def cross_loss_func(loss):
     loss = torch.mean(torch.abs(loss))
     return loss
 
-def generate_flow_left(self, disp):
-    b, _, h, w = disp.shape
-    zero = torch.zero([b, 1, h, w]).to(disp.device)
-    ltr_flow = -disp * w
-    # ltr_flow = tf.concat([ltr_flow, zero_flow], axis=3)
-    return ltr_flow
+def disparity_to_flow(disp):
+    zero = torch.zeros_like(disp)
+    flow = torch.cat((disp, zero), 1)
+    return flow
+
+def plot_grad_flow(named_parameters):
+    ave_grads = []
+    layers = []
+    plt.figure(figsize=(40,15))
+    for n, p in named_parameters:
+        if 'deconv2' in n:
+            continue
+        if(p.requires_grad) and ("bias" not in n):
+            layers.append(n)
+            ave_grads.append(p.grad.abs().mean().cpu().data.numpy())
+    plt.plot(ave_grads, alpha=0.3, color="b")
+    plt.hlines(0, 0, len(ave_grads)+1, linewidth=1, color="k" )
+    plt.xticks(range(0,len(ave_grads), 1), layers, rotation="vertical")
+    plt.xlim(xmin=0, xmax=len(ave_grads))
+    plt.xlabel("Layers")
+    plt.ylabel("average gradient")
+    plt.title("Gradient flow")
+    plt.grid(True)
+    plt.savefig('visualization/grad_flow.png')
