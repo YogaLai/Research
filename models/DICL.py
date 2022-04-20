@@ -1,4 +1,6 @@
 from imp import SEARCH_ERROR
+import random
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -58,10 +60,11 @@ class FlowEntropy(nn.Module):
 
 class FlowRegression(nn.Module):
     # 2D soft argmin/argmax
-    def __init__(self, maxU, maxV):
+    def __init__(self, maxU, maxV, plot_prob=True):
         super(FlowRegression, self).__init__()
         self.maxU = maxU
         self.maxV = maxV
+        self.plot_prob = plot_prob
 
     def forward(self, x):
         assert(x.is_contiguous() == True)
@@ -83,10 +86,22 @@ class FlowRegression(nn.Module):
             
         x = x.view(B,sizeU*sizeV,H,W)
 
+
         if cfg.FLOW_REG_BY_MAX:
             x = F.softmax(x,dim=1)
         else:
             x = F.softmin(x,dim=1)
+        if self.plot_prob:
+            grid_x = np.linspace(-self.maxU, self.maxU, 7)
+            grid_y = np.linspace(-self.maxV, self.maxV, 7)
+            X, Y = np.meshgrid(grid_x,grid_y)
+            fig = plt.figure(figsize=(10, 8))
+            ax = fig.gca(projection='3d')
+            h = random.randint(0, x.size(2))
+            w = random.randint(0, x.size(3))
+            Z = x[0,:,h,w].view(sizeU, sizeV).cpu().data.numpy()
+            ax.plot_surface(X, Y, Z,cmap='Reds',linewidth=0, antialiased=True, zorder = 0.5)
+            plt.savefig('visualization/cost_prob_distribution')
 
         flowU = (x*dispU).sum(dim=1)
         flowV = (x*dispV).sum(dim=1)

@@ -8,8 +8,8 @@ import argparse
 import random
 from PIL import Image
 import matplotlib.pyplot as plt
-from models.PWC_net_concat_cv import *
-# from models.PWC_net_attn_bigger import *
+from models.PWC_net_concat_cv_small import PWCDCNet
+# from models.PWC_stereo_concat_cv_small import PWCDCNet
 # from models.PWC_net_small_attn import *
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--split',                     type=str,   help='validation set', default='kitti')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
-    parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
+    parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file')
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
     parser.add_argument('--input_width',               type=int,   help='input width', default=512)
     parser.add_argument('--checkpoint_path',           type=str,   help='path to a specific checkpoint to load', required=True)
@@ -43,8 +43,13 @@ if args.cuda:
 if args.model_name == 'monodepth':
     net = MonodepthNet()
 elif args.model_name == 'pwc':
-    net = pwc_dc_net()
+    # net = PWCDCNet(attn_dap=True)
+    # net = PWCDCNet(attn_match=True)
+    net = PWCDCNet()
+    # net = PWCDCNet(md=4)
+    # net = PWCDCNet(md=8)
     args.input_width = 768
+    # args.input_height = 384
 elif args.model_name == 'dicl':
     cfg_from_file('cfgs/dicl5_kitti.yml')
     net = dicl_wrapper()
@@ -53,7 +58,10 @@ elif args.model_name == 'dicl':
 if args.cuda:
     net = net.cuda()
 
-left_image_test, right_image_test = get_data(args.filenames_file, args.data_path)
+if args.split == 'middlebury':
+    left_image_test, right_image_test = get_middleburry_data(args.data_path)
+else:
+    left_image_test, right_image_test = get_data(args.filenames_file, args.data_path)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
          batch_size = 1, shuffle = False, drop_last=False)
@@ -85,19 +93,26 @@ for epoch, ckt in ckt_dict:
         disparities = np.zeros((200, args.input_height, args.input_width), dtype=np.float32)
     elif args.split == 'eigen':
         disparities = np.zeros((697, args.input_height, args.input_width), dtype=np.float32)
+    elif args.split == 'middlebury':
+        disparities = np.zeros((13, args.input_height, args.input_width), dtype=np.float32)
 
-    for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
-        left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
-        right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
-        
-        model_input = Variable(torch.cat((left_batch, right_batch), 1))
-        if args.cuda:
-            model_input = model_input.cuda()
+    with torch.no_grad():
+        for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
+            # left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
+            # right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
+            
+            model_input = torch.cat((left, right), 1)
+            if args.cuda:
+                model_input = model_input.cuda()
 
-        disp_est_scale = net(model_input)
-        disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3], disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
+            # since = time.time()
+            disp_est_scale = net(model_input)
+            # print('inference time: ', time.time()-since)
+            # if batch_idx == 5:
+                # exit()
+            disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3], disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
 
-        disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
+            disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
     print('done')
     if not os.path.isdir('out_npy/' + args.exp_name):
         os.makedirs('out_npy/' + args.exp_name)

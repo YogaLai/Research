@@ -2,6 +2,6 @@ matplotlib
 opencv-python
 easydict
 pyyml
-cupy-cuda101
+cupy-cuda102
 tensorboard
 tqdm

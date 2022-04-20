@@ -1,3 +1,4 @@
+from enum import auto
 import torch
 import torch.optim as optim
 import argparse
@@ -5,16 +6,15 @@ import argparse
 # from models.PWC_net_small_sparse import *
 # from models.PWC_net_small_attn import *
 # from models.PWC_stereo_concat_cv_small import PWCDCNet
-from models.PWC_net_concat_cv import PWCDCNet
-from models.DICL import dicl_wrapper
+from models.PWC_net_concat_cv_small import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
-from networks.resample2d_package.resample2d import Resample2d
+# from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
 from config import cfg, cfg_from_file
-
+from apex import amp
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -43,12 +43,13 @@ args = get_args()
 writer = SummaryWriter('logs/' + args.exp_name)
 iter = 0
 start_epoch = 0
+torch.backends.cudnn.benchmark = True
 
 if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
 if args.model_name == 'pwc':
-    net = PWCDCNet(md=4, attn_match=True).cuda()
+    net = PWCDCNet().cuda()
     args.input_width = 768
 elif args.model_name == 'dicl':
     cfg_from_file('cfgs/dicl5_kitti.yml')
@@ -59,10 +60,10 @@ elif args.model_name == 'dicl':
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 cycle_loader_aug = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False)
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4)
 cycle_loader = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, False, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False)
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
 
@@ -70,8 +71,8 @@ slices = []
 for i in range(4):
     slices.append(list(range(i * args.batch_size, (i + 1) * args.batch_size)))
 
-# if torch.cuda.device_count() >= 2:
-#     net = nn.DataParallel(net)
+if torch.cuda.device_count() >= 2:
+    net = nn.DataParallel(net)
 
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
@@ -81,6 +82,7 @@ if args.loadmodel:
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(start_epoch * len(cycle_loader.dataset) / args.batch_size) + 1
 
+net, optimizer = amp.initialize(net, optimizer, opt_level='O1')
 for epoch in range(start_epoch, args.num_epochs):
     print("Epoch :", epoch)
     total_image_loss = 0
@@ -95,7 +97,6 @@ for epoch in range(start_epoch, args.num_epochs):
     CycleLoader = cycle_loader_aug if epoch >= 2 else cycle_loader
     with tqdm(total=len(CycleLoader.dataset)) as pbar:
         for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(CycleLoader):
-
             optimizer.zero_grad()
 
             former = torch.cat((left_image_2, left_image_1, right_image_1, left_image_1), 0)
@@ -109,16 +110,16 @@ for epoch in range(start_epoch, args.num_epochs):
 
             disp_est_scale = net(model_input)
             disp_est = [torch.cat((disp_est_scale[i][:, 0, :, :].unsqueeze(1) / disp_est_scale[i].shape[3],
-                                   disp_est_scale[i][:, 1, :, :].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
+                                disp_est_scale[i][:, 1, :, :].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
             disp_est_scale_2 = net(model_input_2)
             disp_est_2 = [torch.cat((disp_est_scale_2[i][:, 0, :, :].unsqueeze(1) / disp_est_scale_2[i].shape[3],
-                                     disp_est_scale_2[i][:, 1, :, :].unsqueeze(1) / disp_est_scale_2[i].shape[2]), 1) for i in range(4)]
+                                    disp_est_scale_2[i][:, 1, :, :].unsqueeze(1) / disp_est_scale_2[i].shape[2]), 1) for i in range(4)]
 
             border_mask = [create_border_mask(left_pyramid[i], 0.1) for i in range(4)]
             fw_mask = []
             bw_mask = []
             for i in range(4):
-                fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
+                fw, bw, diff_fw, diff_bw = get_mask_wo_resample(disp_est_scale[i], disp_est_scale_2[i], border_mask[i])
                 fw += 1e-3
                 bw += 1e-3
                 fw[slices[0] + slices[-1]] = fw[slices[0] + slices[-1]] * 0 + 1
@@ -129,7 +130,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 bw_mask.append(bw_detached)
 
             # Reconstruction from right to left
-            left_est = [Resample2d()(right_pyramid[i], disp_est_scale[i]) for i in range(4)]
+            left_est = [flow_warp(right_pyramid[i], disp_est_scale[i]) for i in range(4)]
             l1_left = [torch.abs(left_est[i] - left_pyramid[i]) * fw_mask[i] for i in range(4)]
             l1_reconstruction_loss_left = [torch.mean(l1_left[i]) / torch.mean(fw_mask[i]) for i in range(4)]
             ssim_left = [SSIM(left_est[i] * fw_mask[i], left_pyramid[i] * fw_mask[i]) for i in range(4)]
@@ -143,7 +144,7 @@ for epoch in range(start_epoch, args.num_epochs):
             disp_gradient_loss = sum(disp_loss)
 
             # Reconstruction from left to right
-            right_est = [Resample2d()(left_pyramid[i], disp_est_scale_2[i]) for i in range(4)]
+            right_est = [flow_warp(left_pyramid[i], disp_est_scale_2[i]) for i in range(4)]
             l1_right = [torch.abs(right_est[i] - right_pyramid[i]) * bw_mask[i] for i in range(4)]
             l1_reconstruction_loss_right = [torch.mean(l1_right[i]) / torch.mean(bw_mask[i]) for i in range(4)]
             ssim_right = [SSIM(right_est[i] * bw_mask[i], right_pyramid[i] * bw_mask[i]) for i in range(4)]
@@ -157,8 +158,8 @@ for epoch in range(start_epoch, args.num_epochs):
             disp_gradient_loss_2 = sum(disp_loss_2)
 
             # LR consistency
-            right_to_left_disp = [- Resample2d()(disp_est_2[i], disp_est_scale[i]) for i in range(4)]
-            left_to_right_disp = [- Resample2d()(disp_est[i], disp_est_scale_2[i]) for i in range(4)]
+            right_to_left_disp = [- flow_warp(disp_est_2[i], disp_est_scale[i]) for i in range(4)]
+            left_to_right_disp = [- flow_warp(disp_est[i], disp_est_scale_2[i]) for i in range(4)]
 
             lr_left_loss = [torch.mean(torch.abs(right_to_left_disp[i][slices[0] + slices[-1]] - disp_est[i][slices[0] + slices[-1]])) for i in range(4)]
             lr_right_loss = [torch.mean(torch.abs(left_to_right_disp[i][slices[0] + slices[-1]] - disp_est_2[i][slices[0] + slices[-1]])) for i in range(4)]
@@ -213,7 +214,8 @@ for epoch in range(start_epoch, args.num_epochs):
                 warp2_est_2 = [Resample2d()(right_est[i][[0, 1]], disp_est_scale[i][[4, 5]]) for i in range(4)]
                 loss += 0.1 * sum([warp_2(warp2_est_2[i], right_pyramid[i][[6, 7]], mask_2[i], args) for i in range(4)])
 
-            loss.backward()
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
             optimizer.step()
 
             writer.add_scalar('iter/rec_loss', image_loss.data, iter)

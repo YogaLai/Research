@@ -14,8 +14,11 @@ import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
 from models.PWC_net_small_attn import *
+# from models.PWC_net_regression import *
 from utils.scene_dataloader import *
 from utils.utils import *
+from models.DICL import dicl_wrapper
+from config import cfg_from_file
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -39,18 +42,17 @@ if args.cuda:
     torch.cuda.manual_seed(1)
 
 checkpoint = torch.load(args.checkpoint_path)
-if args.model_name == 'monodepth':
-    net = MonodepthNet()
+if args.model_name == 'dicl':
+    cfg_from_file('cfgs/dicl5_kitti.yml')
+    net = dicl_wrapper()
+    args.input_width = 768
 elif args.model_name == 'pwc':
     net = pwc_dc_net()
     args.input_width = 832 
-elif args.model_name == 'realtime_stereo':
-    net = HRstereoNet(maxdisp=192)
-    net = nn.DataParallel(net)
-    args.input_width = 832
    
 if args.cuda:
     net = net.cuda()
+# net = nn.DataParallel(net)
 net.load_state_dict(checkpoint['state_dict'])
 net.eval()
 
@@ -81,12 +83,13 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
     right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
     
     model_input = Variable(torch.cat((left_batch, right_batch), 1))
+    # model_input = Variable(torch.cat((right_batch, left_batch), 1))
     if args.cuda:
         model_input = model_input.cuda()
 
     if args.model_name == 'monodepth':
         disp_est_scale, disp_est= net(model_input)
-    elif args.model_name == 'pwc':
+    elif args.model_name == 'pwc' or args.model_name == 'dicl':
         disp_est_scale = net(model_input)
         disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3], disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
     
@@ -94,7 +97,7 @@ for batch_idx, (left, right) in enumerate(TestImageLoader, 0):
     # img = Image.fromarray(pred_disp)
     # img.save(f'visualization/evaluate/realtime_stereo/{batch_idx}.png')
     # plt.imsave(f'visualization/evaluate/{batch_idx}.png', pred_disp, cmap='jet')
-
+  
     disparities[batch_idx] = -disp_est[0][0,0,:,:].data.cpu().numpy()
 print('done')
 np.save(f'./out_npy/disparities_{args.exp_name}.npy', disparities)

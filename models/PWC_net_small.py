@@ -20,7 +20,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 from networks.correlation_package.correlation import Correlation
 
 __all__ = [
-    'pwc_dc_net', 'pwc_dc_net_old'
+    'pwc_dc_net'
     ]
 def myconv(in_planes, out_planes, kernel_size=3, stride=1, padding=1, dilation=1):   
     return nn.Sequential(

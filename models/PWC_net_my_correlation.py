@@ -15,9 +15,10 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from PIL import Image
 import time
+
+from utils.liteflow_corr import FunctionCorrelation
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 
-from .networks.submodules import *
 from networks.correlation_package.correlation import Correlation
 from utils.correltaiton import MyCorrelation
 
@@ -194,7 +195,8 @@ class PWCDCNet(nn.Module):
         c26 = self.conv6b(self.conv6a(self.conv6aa(c25)))
 
 
-        corr6 = self.corr(c16, c26) 
+        # corr6 = self.corr(c16, c26) 
+        corr6 = FunctionCorrelation(tenOne=c16, tenTwo=c26, intStride=2)
         corr6 = self.leakyRELU(corr6)   
         x = torch.cat((self.conv6_0(corr6), corr6),1)
         x = torch.cat((self.conv6_1(x), x),1)

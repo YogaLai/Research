@@ -142,16 +142,31 @@ class BasicConv(nn.Module):
 
 class MatchingNet(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
-    def __init__(self):
+    def __init__(self, attention_list=None):
         super(MatchingNet, self).__init__()
-        self.match = nn.Sequential(
-                        BasicConv(64, 96, kernel_size=3, padding=1),
-                        BasicConv(96, 128, kernel_size=3, padding=1, stride=2),   # down by 1/2
-                        BasicConv(128, 128, kernel_size=3, padding=1),
-                        BasicConv(128, 64, kernel_size=3, padding=1),
-                        BasicConv(64, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
-                        nn.Conv2d(32, 1, kernel_size=3, padding=1, bias=True),
-                    )
+        if attention_list != None:
+            self.match = nn.Sequential(
+                            BasicConv(64, 96, kernel_size=3, padding=1),
+                            attention_list[0],
+                            BasicConv(96, 128, kernel_size=3, padding=1, stride=2),   # down by 1/2
+                            attention_list[1],
+                            BasicConv(128, 128, kernel_size=3, padding=1),
+                            attention_list[2],
+                            BasicConv(128, 64, kernel_size=3, padding=1),
+                            attention_list[3],
+                            BasicConv(64, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                            attention_list[4],
+                            nn.Conv2d(32, 1, kernel_size=3, padding=1, bias=True),
+                        )
+        else:
+            self.match = nn.Sequential(
+                            BasicConv(64, 96, kernel_size=3, padding=1),
+                            BasicConv(96, 128, kernel_size=3, padding=1, stride=2),   # down by 1/2
+                            BasicConv(128, 128, kernel_size=3, padding=1),
+                            BasicConv(128, 64, kernel_size=3, padding=1),
+                            BasicConv(64, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                            nn.Conv2d(32, 1, kernel_size=3, padding=1, bias=True),
+                        )
 
     def forward(self, x):
             x = self.match(x)
@@ -215,7 +230,7 @@ class MatchingNetSmallAttn(nn.Module):
             return x
 
 
-def compute_cost(x,y, matchnet, md=4):
+def compute_cost(x,y, matchnet, md=3):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape

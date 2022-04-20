@@ -12,16 +12,15 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
-from models.MonodepthModel import *
-from models.PWC_net import *
-from models.PWC_net import PWCDCNet
+from models.PWC_net_small_attn import *
+from models.PWC_net_small_attn import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
 
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)

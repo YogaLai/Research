@@ -4,7 +4,8 @@ import argparse
 # from models.PWC_net import *
 # from models.PWC_net_small_sparse import *
 # from models.PWC_net_small_attn import *
-from models.PWC_net_concat_cv import *
+# from models.PWC_stereo_concat_cv_small import PWCDCNet
+from models.PWC_net_concat_cv_small import PWCDCNet
 from models.DICL import dicl_wrapper
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -42,12 +43,13 @@ args = get_args()
 writer = SummaryWriter('logs/' + args.exp_name)
 iter = 0
 start_epoch = 0
+torch.backends.cudnn.benchmark = True
 
 if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
 if args.model_name == 'pwc':
-    net = pwc_dc_net().cuda()
+    net = PWCDCNet().cuda()
     args.input_width = 768
 elif args.model_name == 'dicl':
     cfg_from_file('cfgs/dicl5_kitti.yml')
@@ -58,7 +60,7 @@ elif args.model_name == 'dicl':
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 CycleLoader = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False)
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
 
@@ -72,7 +74,7 @@ if torch.cuda.device_count() >= 2:
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
     net.load_state_dict(checkpoint['state_dict'])
-    start_epoch = checkpoint['epoch'] + 1
+    start_epoch = checkpoint['epoch']
     scheduler = checkpoint['scheduler']
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1

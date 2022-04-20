@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 import cv2
 from models.MonodepthModel import *
 # from models.PWC_net import *
-# from models.PWC_net import PWCDCNet
 # from models.PWC_net_my_correlation import *
 from models.PWC_net_small import *
+# from models.PWC_net_small_attn import *
 from utils.scene_dataloader import *
 from utils.utils import *
 from networks.resample2d_package.resample2d import Resample2d
@@ -27,7 +27,7 @@ import os
 def get_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--model_name',                type=str,   help='model name', default='monodepth')
+    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
@@ -214,16 +214,6 @@ for epoch in range(start_epoch, args.num_epochs):
             loss.backward()
             optimizer.step()
             
-            
-            if args.model_name == 'monodepth':
-                print("Epoch :", epoch)
-                print("Batch Index :", batch_idx)
-                print(net.conv1.weight.grad[0,0,0,0])
-            elif args.model_name == 'pwc':
-                print("Epoch :", epoch)
-                print("Batch Index :", batch_idx)
-                print(net.conv1a[0].weight.grad[0,0,0,0])
-
             writer.add_scalar('Train_iter/rec_loss', image_loss.data, iter)
             writer.add_scalar('Train_iter/rec_loss_2', image_loss_2.data, iter)
             writer.add_scalar('Train_iter/smooth_loss', disp_gradient_loss.data, iter)

@@ -25,12 +25,13 @@ def eval(epoch, pred_disparities, writer):
     if args.split == 'kitti':
         num_samples = 200
         
-        gt_disparities = load_gt_disp_kitti(args.gt_path)
+        gt_disparities = load_gt_disp_kitti(args.gt_path, 'occ')
         gt_depths, pred_depths, pred_disparities_resized = convert_disps_to_depths_kitti(gt_disparities, pred_disparities)
 
     elif args.split == 'eigen':
         num_samples = 697
-        test_files = read_text_lines('/home/hylai/monodepth/utils/filenames/eigen_test_files.txt')
+        # num_samples = 200
+        test_files = read_text_lines('utils/filenames/eigen_test_files.txt')
         gt_files, gt_calib, im_sizes, im_files, cams = read_file_data(test_files, args.gt_path)
         
         num_test = len(im_files)
@@ -109,7 +110,6 @@ if __name__ == '__main__':
     npy_dict = {}
     path = os.path.join('out_npy', args.exp_name)
     for file in os.listdir(path):
-        # print(file)
         id = file.split('_')[-1].split('.')[0]
         if int(id) < args.epoch_thres:
             continue

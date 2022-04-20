@@ -1,10 +1,11 @@
 import torch
 import torch.optim as optim
 import argparse
+from models.PWC_net_concat_cv_small import PWCDCNet
 # from models.PWC_net import *
 # from models.PWC_net_small_sparse import *
-from models.PWC_net_small_attn import *
-# from models.PWC_net_CM import *
+from models.PWC_net_depth_split import *
+# from models.PWC_net_mul_attn import *
 from models.DICL import dicl_wrapper
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -13,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
 from Forward_Warp.forward_warp import forward_warp
-# from config import cfg, cfg_from_file
+from config import cfg, cfg_from_file
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -47,8 +48,8 @@ if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
 if args.model_name == 'pwc':
-    net = pwc_dc_net().cuda()
-    args.input_width = 832
+    net = PWCDCNet(attn_dap=True)
+    args.input_width = 768
 elif args.model_name == 'dicl':
     cfg_from_file('cfgs/dicl5_kitti.yml')
     net = dicl_wrapper().cuda()
@@ -74,8 +75,8 @@ if args.loadmodel:
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
-# if torch.cuda.device_count() >=2:
-#     net = nn.DataParallel(net) 
+if torch.cuda.device_count() >=2:
+    net = nn.DataParallel(net).cuda() 
 
 for epoch in range(start_epoch, args.num_epochs):
     print("Epoch :", epoch)
@@ -95,9 +96,19 @@ for epoch in range(start_epoch, args.num_epochs):
             model_input_2 = torch.cat((latter, former), 1).cuda()
             
             disp_est_scale = net(model_input)
+            for i in range(4):
+                depth = disp_est_scale[i][:,2:,:,:]
+                depth_flow = disparity_to_flow(depth[:args.batch_size,:,:,:])
+                depth_flow2 = disparity_to_flow(depth[-args.batch_size:,:,:,:])
+                disp_est_scale[i] = torch.cat((depth_flow, disp_est_scale[i][:,:2,:,:], depth_flow2), 0)
             disp_est = [torch.cat((disp_est_scale[i][:,0,:,:].unsqueeze(1) / disp_est_scale[i].shape[3],
                                 disp_est_scale[i][:,1,:,:].unsqueeze(1) / disp_est_scale[i].shape[2]), 1) for i in range(4)]
             disp_est_scale_2 = net(model_input_2)
+            for i in range(4):
+                depth = disp_est_scale_2[i][:,2:,:,:]
+                depth_flow = disparity_to_flow(depth[:args.batch_size,:,:,:])
+                depth_flow2 = disparity_to_flow(depth[-args.batch_size:,:,:,:])
+                disp_est_scale_2[i] = torch.cat((depth_flow, disp_est_scale_2[i][:,:2,:,:], depth_flow2), 0)
             disp_est_2 = [torch.cat((disp_est_scale_2[i][:,0,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[3],
                                     disp_est_scale_2[i][:,1,:,:].unsqueeze(1) / disp_est_scale_2[i].shape[2]), 1) for i in range(4)]
             
@@ -223,6 +234,7 @@ for epoch in range(start_epoch, args.num_epochs):
                 
                 
             loss.backward()
+            # plot_grad_flow(net.named_parameters())
             optimizer.step()
             
 
