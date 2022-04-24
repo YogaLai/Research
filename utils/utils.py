@@ -13,7 +13,7 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
-# from networks.resample2d_package.resample2d import Resample2d
+from networks.resample2d_package.resample2d import Resample2d
 import time
 
 def gradient_x(img):
@@ -307,20 +307,6 @@ def get_soft_mask(backward_flow, fw, slices, eps=1e-3, neg_disp=False):
     mask = torch.clamp(mask, 0, 1)
     return mask
 
-def get_cross_mask(bw_flow, bw_flow2, fw, eps=1e-3):
-    one = torch.ones([bw_flow.size(0), 1, bw_flow.size(2), bw_flow.size(3)]).to(bw_flow.device).contiguous()
-    bw_flow, bw_flow2 = bw_flow.permute(0,2,3,1).contiguous(), bw_flow2.permute(0,2,3,1).contiguous()
-    mask = fw(one, bw_flow)
-    mask = fw(mask, bw_flow2)
-    mask += eps
-    mask = torch.clamp(mask, 0, 1)
-
-    return mask
-
-def cross_loss_func(loss):
-    loss = torch.mean(torch.abs(loss))
-    return loss
-
 def disparity_to_flow(disp):
     zero = torch.zeros_like(disp)
     flow = torch.cat((disp, zero), 1)
@@ -345,3 +331,65 @@ def plot_grad_flow(named_parameters):
     plt.title("Gradient flow")
     plt.grid(True)
     plt.savefig('visualization/grad_flow.png')
+
+def photo_loss_function(diff, mask, q, charbonnier_or_abs_robust, averge=True):
+    if charbonnier_or_abs_robust:
+        p = ((diff) ** 2 + 1e-6).pow(q)
+        p = p * mask
+        if averge:
+            p = p.mean()
+            ap = mask.mean()
+        else:
+            p = p.sum()
+            ap = mask.sum()
+        loss_mean = p / (ap * 2 + 1e-6)
+        
+    else:
+        diff = (torch.abs(diff) + 0.01).pow(q)
+        diff = diff * mask
+        diff_sum = torch.sum(diff)
+        loss_mean = diff_sum / (torch.sum(mask) * 2 + 1e-6)
+       
+    return loss_mean
+
+def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, averge=True, max_disp=3):
+    patch_size = 2 * max_disp + 1
+
+    def _ternary_transform_torch(image):
+        R, G, B = torch.split(image, 1, 1)
+        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B)  # * 255  # convert to gray
+        # intensities = tf.image.rgb_to_grayscale(image) * 255
+        out_channels = patch_size * patch_size
+        w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))  # h,w,1,out_c
+        w_ = np.transpose(w, (3, 2, 0, 1))  # 1,out_c,h,w
+        weight = torch.from_numpy(w_).float()
+        if image.is_cuda:
+            weight = weight.cuda()
+        patches_torch = torch.conv2d(input=intensities_torch, weight=weight, bias=None, stride=[1, 1], padding=[max_disp, max_disp])
+        transf_torch = patches_torch - intensities_torch
+        transf_norm_torch = transf_torch / torch.sqrt(0.81 + transf_torch ** 2)
+        return transf_norm_torch
+
+    def _hamming_distance_torch(t1, t2):
+        dist = (t1 - t2) ** 2
+        dist = torch.sum(dist / (0.1 + dist), 1, keepdim=True)
+        return dist
+
+    def create_mask_torch(tensor, paddings):
+        shape = tensor.shape  # N,c, H,W
+        inner_width = shape[2] - (paddings[0][0] + paddings[0][1])
+        inner_height = shape[3] - (paddings[1][0] + paddings[1][1])
+        inner_torch = torch.ones([shape[0], shape[1], inner_width, inner_height]).float()
+        if tensor.is_cuda:
+            inner_torch = inner_torch.cuda()
+        mask2d = F.pad(inner_torch, [paddings[0][0], paddings[0][1], paddings[1][0], paddings[1][1]])
+        return mask2d
+
+    img1 = _ternary_transform_torch(img1)
+    img1_warp = _ternary_transform_torch(img1_warp)
+    dist = _hamming_distance_torch(img1, img1_warp)
+    transform_mask = create_mask_torch(mask, [[max_disp, max_disp],
+                                                [max_disp, max_disp]])
+    census_loss = photo_loss_function(diff=dist, mask=mask * transform_mask, q=q,
+                                            charbonnier_or_abs_robust=charbonnier_or_abs_robust, averge=averge)
+    return census_loss
