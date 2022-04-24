@@ -190,6 +190,31 @@ class MatchingNetSmall(nn.Module):
             x = self.match(x)
             return x
 
+class MatchingNetSmaillRes(nn.Module):
+    # Matching net with 2D conv as mentioned in the paper
+    def __init__(self, dcn=False):
+        super(MatchingNetSmaillRes, self).__init__()
+        self.match_list = nn.ModuleList([
+                        BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
+                        BasicConv(48, 96, kernel_size=3, padding=1, stride=2, dcn=dcn),   # down by 1/2
+                        BasicConv(96, 96, kernel_size=3, padding=1, dcn=dcn),
+                        BasicConv(96, 48, kernel_size=3, padding=1, dcn=dcn),
+                        BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
+                        nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
+        ])
+                    
+        # self.conv1x1_96 = nn.Conv2d(32, 96, kernel_size=1, bias=False, stride=2)
+        # self.conv1x1_48 = nn.Conv2d(96, 48, kernel_size=1, bias=False)
+        # self.conv1x1 = nn.Conv2d(32, 1, kernel_size=1, bias=False, stride=1)
+
+    def forward(self, x):
+        identity = x
+        for i in range(len(self.match_list)):
+            x = self.match_list[i](x)
+            if i == len(self.match_list)-2:
+                x = x + identity
+        return x
+
 class MatchingNetDeep(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
     def __init__(self, dcn=False):
@@ -267,7 +292,7 @@ def compute_dc_cost(x,y, matchnet, md=3):
     b,c,height,width = x.shape
     with torch.cuda.device_of(x):
         # init cost as tensor matrix
-        cost = x.new().resize_(x.size()[0], c, 2*md+1, 2*md+1, height, width).zero_()
+        # cost = x.new().resize_(x.size()[0], c, 2*md+1, 2*md+1, height, width).zero_()
 
         # for i in range(2*md+1):
         #     ind = i-md
