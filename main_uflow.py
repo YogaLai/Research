@@ -26,7 +26,7 @@ def get_args():
     parser.add_argument('--batch_size',                type=int,   help='batch size', default=2)
     parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=80)
     parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
-    parser.add_argument('--lr_loss_weight',            type=float, help='left-right consistency weight', default=0.5)
+    parser.add_argument('--lr_loss_weight',            type=float, help='left-right consistency weight', default=0.1)
     parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.01)
     parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=0.05)
     parser.add_argument('--alpha_image_loss',          type=float, help='weight between SSIM and L1 in the image loss', default=0.85)
@@ -45,6 +45,7 @@ args = get_args()
 writer = SummaryWriter('logs/' + args.exp_name)
 iter = 0
 start_epoch = 0
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 
 if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
@@ -59,12 +60,12 @@ elif args.model_name == 'dicl':
 
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
-cycle_loader_aug = torch.utils.data.DataLoader(
+CycleLoader = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False)
-cycle_loader = torch.utils.data.DataLoader(
-    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, False, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False)
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
+# cycle_loader = torch.utils.data.DataLoader(
+#     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, False, args),
+#     batch_size=args.batch_size, shuffle=True, drop_last=False)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
 
@@ -72,8 +73,9 @@ slices = []
 for i in range(4):
     slices.append(list(range(i * args.batch_size, (i + 1) * args.batch_size)))
 
-# if torch.cuda.device_count() >= 2:
-#     net = nn.DataParallel(net)
+if torch.cuda.device_count() >= 2:
+    net = nn.DataParallel(net, device_ids=[0,1])
+    net = net.cuda()
 
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
@@ -81,7 +83,7 @@ if args.loadmodel:
     start_epoch = checkpoint['epoch']
     scheduler = checkpoint['scheduler']
     optimizer.load_state_dict(checkpoint['optimizer'])
-    iter = int(start_epoch * len(cycle_loader.dataset) / args.batch_size) + 1
+    iter = int(start_epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
 for epoch in range(start_epoch, args.num_epochs):
     print("Epoch :", epoch)
@@ -95,7 +97,6 @@ for epoch in range(start_epoch, args.num_epochs):
         total_warp2loss = 0
         total_warp2loss_2 = 0
 
-    CycleLoader = cycle_loader_aug if epoch >= 2 else cycle_loader
     with tqdm(total=len(CycleLoader.dataset)) as pbar:
         for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(CycleLoader):
             optimizer.zero_grad()
