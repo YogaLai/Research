@@ -393,3 +393,22 @@ def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, a
     census_loss = photo_loss_function(diff=dist, mask=mask * transform_mask, q=q,
                                             charbonnier_or_abs_robust=charbonnier_or_abs_robust, averge=averge)
     return census_loss
+
+def upsample_flow(inputs, target_size=None, target_flow=None, mode="bilinear"):
+    if target_size is not None:
+        h, w = target_size
+    elif target_flow is not None:
+        _, _, h, w = target_flow.size()
+    else:
+        raise ValueError('wrong input')
+    _, _, h_, w_ = inputs.size()
+    res = torch.nn.functional.interpolate(inputs, [h, w], mode=mode, align_corners=True)
+    res[:, 0, :, :] *= (w / w_)
+    res[:, 1, :, :] *= (h / h_)
+    return res
+
+def photo_loss_abs_robust(x, y, occ_mask, photo_loss_delta=0.4):
+    photo_diff = x - y
+    loss_diff = (torch.abs(photo_diff) + 0.01).pow(photo_loss_delta)
+    photo_loss = torch.sum(loss_diff * occ_mask) / (torch.sum(occ_mask) + 1e-6)
+    return photo_loss
