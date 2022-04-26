@@ -335,7 +335,7 @@ class PWCDCNet(nn.Module):
         # x = self.cascade_attn3(x)
         x = self.conv3_4(x)
         # x = self.cascade_attn4(x)
-        flow3 = self.predict_flow3(x)
+        flow3 = self.predict_flow3(x) + up_flow4
         up_flow3 = upsample2d_flow_as(flow3, c12)
         # up_flow3 = self.deconv3(flow3)*2
         up_feat3 = self.upfeat3(x)
