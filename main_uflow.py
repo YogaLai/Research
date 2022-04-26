@@ -124,30 +124,26 @@ for epoch in range(start_epoch, args.num_epochs):
             bw_mask = bw.clone().detach()
 
             # try census
-            # left_est = [Resample2d()(right_pyramid[i], disp_est_scale[i]) for i in range(4)]
-            # closs_left = [census_loss(left_pyramid[i], left_est[i], fw_mask[i]) for i in range(4)]
-            # image_loss = sum(closs_left)
+            left_est = Resample2d()(latter, disp_est_scale) 
+            image_loss = census_loss(former, left_est, fw_mask)
+            right_est = Resample2d()(former, disp_est_scale_2)
+            image_loss_2 = census_loss(latter, right_est, bw_mask)
 
-            # try census
-            # right_est = [Resample2d()(left_pyramid[i], disp_est_scale_2[i]) for i in range(4)]
-            # closs_right = [census_loss(right_pyramid[i], right_est[i], bw_mask[i]) for i in range(4)]
-            # image_loss_2 = sum(closs_right)
+            # # Reconstruction from right to left
+            # left_est = Resample2d()(latter, disp_est_scale)
+            # l1_left = torch.abs(left_est - former) * fw_mask 
+            # l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
+            # ssim_left = SSIM(left_est * fw_mask, former * fw_mask) 
+            # ssim_loss_left = torch.mean(ssim_left) / torch.mean(fw_mask) 
+            # image_loss = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left
 
-            # Reconstruction from right to left
-            left_est = Resample2d()(latter, disp_est_scale)
-            l1_left = torch.abs(left_est - former) * fw_mask 
-            l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
-            ssim_left = SSIM(left_est * fw_mask, former * fw_mask) 
-            ssim_loss_left = torch.mean(ssim_left) / torch.mean(fw_mask) 
-            image_loss = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left
-
-            # Reconstruction from left to right
-            right_est = Resample2d()(former, disp_est_scale_2) 
-            l1_right = torch.abs(right_est - latter) * bw_mask 
-            l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask) 
-            ssim_right = SSIM(right_est * bw_mask, latter * bw_mask) 
-            ssim_loss_right = torch.mean(ssim_right) / torch.mean(bw_mask) 
-            image_loss_2 =  args.alpha_image_loss * ssim_loss_right + (1 - args.alpha_image_loss) * l1_reconstruction_loss_right
+            # # Reconstruction from left to right
+            # right_est = Resample2d()(former, disp_est_scale_2) 
+            # l1_right = torch.abs(right_est - latter) * bw_mask 
+            # l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask) 
+            # ssim_right = SSIM(right_est * bw_mask, latter * bw_mask) 
+            # ssim_loss_right = torch.mean(ssim_right) / torch.mean(bw_mask) 
+            # image_loss_2 =  args.alpha_image_loss * ssim_loss_right + (1 - args.alpha_image_loss) * l1_reconstruction_loss_right
             
             # Smooth loss
             disp_gradient_loss = cal_grad2_error(disp_est_scale / 20, former, 1.0) 
