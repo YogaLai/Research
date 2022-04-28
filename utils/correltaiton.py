@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from models.Dual_attention import DualAttention
 from models.lib.dcn import DeformableConv2d
 # from networks.correlation_package.correlation import Correlation
 
@@ -192,7 +193,7 @@ class MatchingNetSmall(nn.Module):
 
 class MatchingNetSmaillRes(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
-    def __init__(self, dcn=False):
+    def __init__(self, attn_match=False, dcn=False):
         super(MatchingNetSmaillRes, self).__init__()
         self.match_list = nn.ModuleList([
                         BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
@@ -202,7 +203,9 @@ class MatchingNetSmaillRes(nn.Module):
                         BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
                         nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
         ])
-                    
+        if attn_match:
+            self.bam = DualAttention(32)
+
         # self.conv1x1_96 = nn.Conv2d(32, 96, kernel_size=1, bias=False, stride=2)
         # self.conv1x1_48 = nn.Conv2d(96, 48, kernel_size=1, bias=False)
         # self.conv1x1 = nn.Conv2d(32, 1, kernel_size=1, bias=False, stride=1)
@@ -213,6 +216,8 @@ class MatchingNetSmaillRes(nn.Module):
             x = self.match_list[i](x)
             if i == len(self.match_list)-2:
                 x = x + identity
+                if hasattr(self, 'bam'):
+                    self.bam(x)
         return x
 
 class MatchingNetDeep(nn.Module):

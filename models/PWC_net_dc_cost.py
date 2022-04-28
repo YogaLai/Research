@@ -78,18 +78,19 @@ class PWCDCNet(nn.Module):
 
         # attention_list = None
         # if attn_match:
-        #     attention_list = nn.ModuleList([
-        #         DualAttention(96),
-        #         DualAttention(128),
-        #         DualAttention(128),
-        #         DualAttention(64),
-        #         DualAttention(32),
-        #     ]) 
-        self.matchnet2 = MatchingNetSmaillRes()
-        self.matchnet3 = MatchingNetSmaillRes()
-        self.matchnet4 = MatchingNetSmaillRes()
-        self.matchnet5 = MatchingNetSmaillRes()
-        self.matchnet6 = MatchingNetSmaillRes()
+            # attention2 = nn.ModuleList([
+            #     DualAttention(48),
+            #     DualAttention(96),
+            #     DualAttention(96),
+            #     DualAttention(48),
+            #     DualAttention(32),
+            # ]) 
+
+        self.matchnet2 = MatchingNetSmaillRes(attn_match)
+        self.matchnet3 = MatchingNetSmaillRes(attn_match)
+        self.matchnet4 = MatchingNetSmaillRes(attn_match)
+        self.matchnet5 = MatchingNetSmaillRes(attn_match)
+        self.matchnet6 = MatchingNetSmaillRes(attn_match)
 
         self.dap6 = DAP(md=md)
         self.dap5 = DAP(md=md)
