@@ -204,7 +204,13 @@ class MatchingNetSmaillRes(nn.Module):
                         nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
         ])
         if attn_match:
-            self.bam = DualAttention(32)
+            self.bam = nn.ModuleList([
+                DualAttention(48),
+                DualAttention(96),
+                DualAttention(96),
+                DualAttention(48),
+                DualAttention(32),
+            ])
 
         # self.conv1x1_96 = nn.Conv2d(32, 96, kernel_size=1, bias=False, stride=2)
         # self.conv1x1_48 = nn.Conv2d(96, 48, kernel_size=1, bias=False)
@@ -214,10 +220,10 @@ class MatchingNetSmaillRes(nn.Module):
         identity = x
         for i in range(len(self.match_list)):
             x = self.match_list[i](x)
+            if hasattr(self, 'bam') and i < len(self.match_list)-1:
+                x = self.bam[i](x)
             if i == len(self.match_list)-2:
                 x = x + identity
-                if hasattr(self, 'bam'):
-                    self.bam(x)
         return x
 
 class MatchingNetDeep(nn.Module):
