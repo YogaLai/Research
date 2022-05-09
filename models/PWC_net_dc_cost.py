@@ -45,7 +45,7 @@ class PWCDCNet(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
     """
-    def __init__(self, md=3, attn_match=False):
+    def __init__(self, md=3, attn_match=False, relation='dot-product'):
         """
         input: md --- maximum displacement (for correlation. default: 4), after warpping
         """
@@ -99,6 +99,7 @@ class PWCDCNet(nn.Module):
         self.dap2 = DAP(md=md)
 
         self.leakyRELU = nn.LeakyReLU(0.1)
+        self.relation = relation        
         self.md = md
         nd = (2*md+1)**2
         dd = np.cumsum([128,128,96,64,32])
@@ -245,7 +246,7 @@ class PWCDCNet(nn.Module):
         c26 = self.conv_out6(c26)
        
 
-        corr6 = compute_dc_cost(c16, c26, self.matchnet6, self.md)
+        corr6 = compute_dc_cost(c16, c26, self.matchnet6, self.md, self.relation)
         corr6 = self.dap6(corr6)
         corr6 = self.leakyRELU(corr6)  
 
@@ -269,7 +270,7 @@ class PWCDCNet(nn.Module):
 
         
         warp5 = self.warp(c25, up_flow6*0.625)
-        corr5 = compute_dc_cost(c15, warp5, self.matchnet5, self.md)
+        corr5 = compute_dc_cost(c15, warp5, self.matchnet5, self.md, self.relation)
         corr5 = self.dap5(corr5)
         corr5 = self.leakyRELU(corr5)
         x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
@@ -289,7 +290,7 @@ class PWCDCNet(nn.Module):
 
        
         warp4 = self.warp(c24, up_flow5*1.25)
-        corr4 = compute_dc_cost(c14, warp4, self.matchnet4, self.md)
+        corr4 = compute_dc_cost(c14, warp4, self.matchnet4, self.md, self.relation)
         corr4 = self.dap4(corr4)
         corr4 = self.leakyRELU(corr4)
 
@@ -310,7 +311,7 @@ class PWCDCNet(nn.Module):
 
 
         warp3 = self.warp(c23, up_flow4*2.5)
-        corr3 = compute_dc_cost(c13, warp3, self.matchnet3, self.md)
+        corr3 = compute_dc_cost(c13, warp3, self.matchnet3, self.md, self.relation)
         corr3 = self.dap3(corr3) 
         corr3 = self.leakyRELU(corr3)
         
@@ -331,7 +332,7 @@ class PWCDCNet(nn.Module):
 
 
         warp2 = self.warp(c22, up_flow3*5.0) 
-        corr2 = compute_dc_cost(c12, warp2, self.matchnet2, self.md)
+        corr2 = compute_dc_cost(c12, warp2, self.matchnet2, self.md, self.relation)
         corr2 = self.dap2(corr2)
         corr2 = self.leakyRELU(corr2)
 

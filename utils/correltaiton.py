@@ -297,7 +297,7 @@ def compute_cost(x,y, matchnet, md=3):
         # (B, U, V, H, W)
         return cost
 
-def compute_dc_cost(x,y, matchnet, md=3):
+def compute_dc_cost(x,y, matchnet, md=3, relation='dot-product'):
     sizeU = 2*md+1
     sizeV = 2*md+1
     b,c,height,width = x.shape
@@ -319,7 +319,10 @@ def compute_dc_cost(x,y, matchnet, md=3):
         #         )
         y = torch.nn.functional.unfold(y, (sizeU, sizeV), padding=md).view(b,c, sizeU, sizeV, height, width)
         cost = x.unsqueeze(2).unsqueeze(3)
-        cost = cost * y.view(b,c, sizeU, sizeV, height, width)
+        if relation == 'dot-product':
+            cost = cost * y.view(b,c, sizeU, sizeV, height, width)
+        elif relation == 'subtraction':
+            cost = cost - y.view(b,c, sizeU, sizeV, height, width)
 
         # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
         cost = cost.permute([0,2,3,1,4,5]).contiguous() 
