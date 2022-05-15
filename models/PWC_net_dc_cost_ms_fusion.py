@@ -62,12 +62,21 @@ class MultiScaleFeatureFusion(nn.Module):
             nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
         )
 
-        self.downconv4_5 = convbn(32, 32, kernel_size=3, padding=1, stride=2) 
-        self.downconv3_5 = nn.Sequential(
-            convbn(32, 32, kernel_size=3, padding=1, stride=2), 
-            convbn(32, 32, kernel_size=3, padding=1, stride=2)
-        ) 
+        self.upconv6_5 = convbn(32, 32, kernel_size=1, padding=0) 
+        self.downconv4_5 = convbn(32, 32, kernel_size=3, padding=1, stride=2)
         self.fusion5 = nn.Sequential(
+            self.leakyRELU,
+            convbn(32, 32, kernel_size=3),
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+        self.downconv5_6 = convbn(32, 32, kernel_size=3, padding=1, stride=2)
+        self.downconv4_6 = nn.Sequential(
+            convbn(32, 32, kernel_size=3, padding=1, stride=2),
+            convbn(32, 32, kernel_size=3, padding=1, stride=2)
+        )
+        self.fusion6 = nn.Sequential(
             self.leakyRELU,
             convbn(32, 32, kernel_size=3),
             self.leakyRELU,
@@ -76,7 +85,7 @@ class MultiScaleFeatureFusion(nn.Module):
 
 
     def forward(self, feats_list):
-        f2, f3, f4, f5 = feats_list
+        f2, f3, f4, f5, f6 = feats_list
         f3_to_f2 = self.upconv3_2(F.upsample(f3, (f2.size(2), f2.size(3))))
         f4_to_f2 = self.upconv4_2(F.upsample(f4, (f2.size(2), f2.size(3))))
         fusion2 = f2 + f3_to_f2 + f4_to_f2
@@ -92,12 +101,17 @@ class MultiScaleFeatureFusion(nn.Module):
         fusion4 = f4 + f5_to_f4 + f3_to_f4
         fusion4 = self.fusion4(fusion4)
 
+        f6_to_f5 = self.upconv6_5(F.upsample(f6, (f5.size(2), f5.size(3))))
         f4_to_f5 = self.downconv4_5(f4)
-        f3_to_f5 = self.downconv3_5(f3)
-        fusion5 = f5 + f4_to_f5 + f3_to_f5
+        fusion5 = f5 + f6_to_f5 + f4_to_f5
         fusion5 = self.fusion5(fusion5)
 
-        return fusion2, fusion3, fusion4, fusion5
+        f5_to_f6 = self.downconv5_6(f5)
+        f4_to_f6 = self.downconv4_6(f4)
+        fusion6 = f6 + f5_to_f6 + f4_to_f6
+        fusion6 = self.fusion6(fusion6)
+
+        return fusion2, fusion3, fusion4, fusion5, fusion6
 
 
 class DAP(nn.Module):
@@ -188,9 +202,9 @@ class PWCDCNet(nn.Module):
         self.conv6_4 = myconv(64,32,  kernel_size=3, stride=1)        
         self.predict_flow6 = predict_flow(32)
         self.deconv6 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat6 = deconv(32, 2, kernel_size=4, stride=2, padding=1)
+        # self.upfeat6 = deconv(32, 2, kernel_size=4, stride=2, padding=1)
         
-        od = nd+32+4
+        od = nd+32+2
         # od = nd+128+4
         self.conv5_0 = myconv(od,      128, kernel_size=3, stride=1)
         self.conv5_1 = myconv(128,128, kernel_size=3, stride=1)
@@ -199,7 +213,7 @@ class PWCDCNet(nn.Module):
         self.conv5_4 = myconv(64,32,  kernel_size=3, stride=1)
         self.predict_flow5 = predict_flow(32) 
         self.deconv5 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat5 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
+        # self.upfeat5 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+96+4
         self.conv4_0 = myconv(od,      128, kernel_size=3, stride=1)
@@ -209,7 +223,7 @@ class PWCDCNet(nn.Module):
         self.conv4_4 = myconv(64,32,  kernel_size=3, stride=1)
         self.predict_flow4 = predict_flow(32) 
         self.deconv4 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat4 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
+        # self.upfeat4 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+64+4
         self.conv3_0 = myconv(od,      128, kernel_size=3, stride=1)
@@ -219,7 +233,7 @@ class PWCDCNet(nn.Module):
         self.conv3_4 = myconv(64,32,  kernel_size=3, stride=1)
         self.predict_flow3 = predict_flow(32) 
         self.deconv3 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat3 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
+        # self.upfeat3 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
         # od = nd+32+4
         self.conv2_0 = myconv(od,      128, kernel_size=3, stride=1)
@@ -314,8 +328,8 @@ class PWCDCNet(nn.Module):
         c16 = self.conv_out6(c16)
         c26 = self.conv_out6(c26)
 
-        c12, c13, c14, c15 = self.multiscale_feature_fusion([c12,c13,c14,c15])
-        c22, c23, c24, c25 = self.multiscale_feature_fusion([c12,c13,c14,c15])
+        c12, c13, c14, c15, c16 = self.multiscale_feature_fusion([c12,c13,c14,c15,c16])
+        c22, c23, c24, c25, c26 = self.multiscale_feature_fusion([c12,c13,c14,c15,c26])
 
        
 
@@ -339,14 +353,13 @@ class PWCDCNet(nn.Module):
 
         flow6 = self.predict_flow6(x)
         up_flow6 = self.deconv6(flow6)
-        up_feat6 = self.upfeat6(x)
 
         
         warp5 = self.warp(c25, up_flow6*0.625)
         corr5 = compute_dc_cost(c15, warp5, self.matchnet5, self.md, self.relation)
         corr5 = self.dap5(corr5)
         corr5 = self.leakyRELU(corr5)
-        x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
+        x = torch.cat((corr5, c15, up_flow6), 1)
         x = self.conv5_0(x)
         # x = self.cascade_attn0(x)
         x = self.conv5_1(x)
@@ -359,7 +372,6 @@ class PWCDCNet(nn.Module):
         # x = self.cascade_attn4(x)
         flow5 = self.predict_flow5(x)
         up_flow5 = self.deconv5(flow5)
-        up_feat5 = self.upfeat5(x)
 
        
         warp4 = self.warp(c24, up_flow5*1.25)
@@ -367,7 +379,7 @@ class PWCDCNet(nn.Module):
         corr4 = self.dap4(corr4)
         corr4 = self.leakyRELU(corr4)
 
-        x = torch.cat((corr4, c14, up_flow5, up_feat5), 1)
+        x = torch.cat((corr4, c14, up_flow5), 1)
         x = self.conv4_0(x)
         # x = self.cascade_attn0(x)
         x = self.conv4_1(x)
@@ -380,7 +392,6 @@ class PWCDCNet(nn.Module):
         # x = self.cascade_attn4(x)
         flow4 = self.predict_flow4(x)
         up_flow4 = self.deconv4(flow4)
-        up_feat4 = self.upfeat4(x)
 
 
         warp3 = self.warp(c23, up_flow4*2.5)
@@ -388,7 +399,7 @@ class PWCDCNet(nn.Module):
         corr3 = self.dap3(corr3) 
         corr3 = self.leakyRELU(corr3)
         
-        x = torch.cat((corr3, c13, up_flow4, up_feat4), 1)
+        x = torch.cat((corr3, c13, up_flow4), 1)
         x = self.conv3_0(x)
         # x = self.cascade_attn0(x)
         x = self.conv3_1(x)
@@ -401,7 +412,6 @@ class PWCDCNet(nn.Module):
         # x = self.cascade_attn4(x)
         flow3 = self.predict_flow3(x)
         up_flow3 = self.deconv3(flow3)
-        up_feat3 = self.upfeat3(x)
 
 
         warp2 = self.warp(c22, up_flow3*5.0) 
@@ -409,7 +419,7 @@ class PWCDCNet(nn.Module):
         corr2 = self.dap2(corr2)
         corr2 = self.leakyRELU(corr2)
 
-        x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
+        x = torch.cat((corr2, c12, up_flow3), 1)
         x = self.conv2_0(x)
         # x = self.cascade_attn0(x)
         x = self.conv2_1(x)
