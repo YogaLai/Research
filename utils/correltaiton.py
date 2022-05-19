@@ -191,10 +191,10 @@ class MatchingNetSmall(nn.Module):
             x = self.match(x)
             return x
 
-class MatchingNetSmaillRes(nn.Module):
+class MatchingNetSmallRes(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
-    def __init__(self, attn_match=False, dcn=False):
-        super(MatchingNetSmaillRes, self).__init__()
+    def __init__(self, attn_list, dcn=False):
+        super(MatchingNetSmallRes, self).__init__()
         self.match_list = nn.ModuleList([
                         BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
                         BasicConv(48, 96, kernel_size=3, padding=1, stride=2, dcn=dcn),   # down by 1/2
@@ -203,14 +203,8 @@ class MatchingNetSmaillRes(nn.Module):
                         BasicConv(48, 32, kernel_size=4, padding=1, stride=2, deconv=True), # up by 1/2 
                         nn.Conv2d(32, 1  , kernel_size=3, padding=1, bias=True),
         ])
-        if attn_match:
-            self.bam = nn.ModuleList([
-                DualAttention(48),
-                DualAttention(96),
-                DualAttention(96),
-                DualAttention(48),
-                DualAttention(32),
-            ])
+        if attn_list != None:
+            self.bam = attn_list
 
         # self.conv1x1_96 = nn.Conv2d(32, 96, kernel_size=1, bias=False, stride=2)
         # self.conv1x1_48 = nn.Conv2d(96, 48, kernel_size=1, bias=False)
