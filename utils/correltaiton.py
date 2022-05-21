@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from models.Dual_attention import DualAttention
 from models.lib.dcn import DeformableConv2d
+import torch.nn.functional as F
+import numpy as np
 # from networks.correlation_package.correlation import Correlation
 
 class MyCorrelation(nn.Module):
@@ -18,6 +20,17 @@ class MyCorrelation(nn.Module):
                 cv.append(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
         
         return torch.cat(cv, axis=1)
+
+def torch_pwc_corr(refimg_fea, targetimg_fea):
+    maxdisp=4
+    b,c,h,w = refimg_fea.shape
+    targetimg_fea = F.unfold(targetimg_fea, (2*maxdisp+1,2*maxdisp+1), padding=maxdisp).view(b,c,2*maxdisp+1, 2*maxdisp+1**2,h,w)
+    cost = refimg_fea.view(b,c,h,w)[:,:,np.newaxis, np.newaxis]*targetimg_fea.view(b,c,2*maxdisp+1, 2*maxdisp+1**2,h,w)
+    cost = cost.sum(1)
+
+    b, ph, pw, h, w = cost.size()
+    cost = cost.view(b, ph * pw, h, w)/refimg_fea.size(1)
+    return cost
 
 class GwcCorrelation(nn.Module):
     def __init__(self, d=4, n_groups=16):
@@ -74,26 +87,6 @@ class AttnCorrelation(nn.Module):
                 cv.append(torch.mean(attn*similarity, dim=1, keepdim=True))
         
         return torch.cat(cv, axis=1)
-
-# class AttnCorrelation(nn.Module):
-#     def __init__(self, in_channels, d=4, reduce_factor=8):
-#         super(AttnCorrelation,self).__init__()
-#         self.d = d
-#         self.conv_q = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
-#         self.conv_k = nn.Conv2d(in_channels, in_channels//8, kernel_size=1)
-    
-#     def forward(self, feat1, feat2):
-#         h, w = feat1.size(2), feat1.size(3)
-#         feat1 = self.conv_q(feat1)
-#         feat2 = self.conv_k(feat2)
-#         cv = []
-#         feat2 = torch.nn.functional.pad(feat2, [self.d,self.d,self.d,self.d], "constant", 0)
-#         for i in range(2*self.d+1):
-#             for j in range(2*self.d+1):
-#                 corr = torch.nn.functional.softmax(torch.mean(feat1*feat2[:,:,i:(i+h),j:(j+w)], dim=1, keepdim=True))
-#                 cv.append(corr)
-        
-#         return torch.cat(cv, axis=1)
 
 def split_correlation(feat1, feat2, direction, d=4 ):
     assert direction == 'horizontal' or direction == 'vertical'
