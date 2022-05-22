@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import torch
 import numpy as np
 from torch.autograd import Variable
@@ -65,14 +66,14 @@ class PWCDCNet(nn.Module):
         self.cascade_attn4 = DualAttention(32)
 
         if share_sebock:
-            self.se_block0 = SEBlock(nd, reduction_ratio=9)
+            self.se_block0 = SEBlock(nd, reduction_ratio=16)
             self.se_block4 = self.se_block3 = self.se_block2 = self.se_block1 = self.se_block0
         else:
-            self.se_block0 = SEBlock(nd, reduction_ratio=9)
-            self.se_block1 = SEBlock(nd, reduction_ratio=9)
-            self.se_block2 = SEBlock(nd, reduction_ratio=9)
-            self.se_block3 = SEBlock(nd, reduction_ratio=9)
-            self.se_block4 = SEBlock(nd, reduction_ratio=9)
+            self.se_block0 = SEBlock(196, reduction_ratio=16)
+            self.se_block1 = SEBlock(128, reduction_ratio=16)
+            self.se_block2 = SEBlock(96, reduction_ratio=16)
+            self.se_block3 = SEBlock(64, reduction_ratio=16)
+            self.se_block4 = SEBlock(32, reduction_ratio=16)
 
 
         od = nd
@@ -198,8 +199,8 @@ class PWCDCNet(nn.Module):
         c26 = self.conv6b(self.conv6a(self.conv6aa(c25)))
 
 
-        corr6 = torch_pwc_corr(c16, c26) 
-        corr6 = self.se_block0(corr6)
+        corr6 = torch_pwc_corr(c16, c26, self.se_block0) 
+        # corr6 = self.se_block0(corr6)
         corr6 = self.leakyRELU(corr6)  
 
         x = self.conv6_0(corr6)
@@ -222,8 +223,8 @@ class PWCDCNet(nn.Module):
 
         
         warp5 = self.warp(c25, up_flow6*0.625)
-        corr5 = torch_pwc_corr(c15, warp5) 
-        corr5 = self.se_block1(corr5)
+        corr5 = torch_pwc_corr(c15, warp5, self.se_block1) 
+        # corr5 = self.se_block1(corr5)
         corr5 = self.leakyRELU(corr5)
         x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
         x = self.conv5_0(x)
@@ -242,8 +243,8 @@ class PWCDCNet(nn.Module):
 
        
         warp4 = self.warp(c24, up_flow5*1.25)
-        corr4 = torch_pwc_corr(c14, warp4)  
-        corr4 = self.se_block2(corr4)
+        corr4 = torch_pwc_corr(c14, warp4, self.se_block2)  
+        # corr4 = self.se_block2(corr4)
         corr4 = self.leakyRELU(corr4)
         x = torch.cat((corr4, c14, up_flow5, up_feat5), 1)
         x = self.conv4_0(x)
@@ -262,8 +263,8 @@ class PWCDCNet(nn.Module):
 
 
         warp3 = self.warp(c23, up_flow4*2.5)
-        corr3 = torch_pwc_corr(c13, warp3)
-        corr3 = self.se_block3(corr3) 
+        corr3 = torch_pwc_corr(c13, warp3, self.se_block3)
+        # corr3 = self.se_block3(corr3) 
         corr3 = self.leakyRELU(corr3)
         x = torch.cat((corr3, c13, up_flow4, up_feat4), 1)
         x = self.conv3_0(x)
@@ -282,9 +283,8 @@ class PWCDCNet(nn.Module):
 
 
         warp2 = self.warp(c22, up_flow3*5.0) 
-        corr2 = torch_pwc_corr(c12, warp2)
-        corr2 = self.se_block4(corr2)
-        corr2 = self.leakyRELU(corr2)
+        corr2 = torch_pwc_corr(c12, warp2, self.se_block4)
+        # corr2 = self.se_block4(corr2)
         x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
         x = self.conv2_0(x)
         x = self.cascade_attn0(x)

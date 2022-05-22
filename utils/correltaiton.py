@@ -21,13 +21,28 @@ class MyCorrelation(nn.Module):
         
         return torch.cat(cv, axis=1)
 
-def torch_pwc_corr(refimg_fea, targetimg_fea):
+def torch_pwc_corr(refimg_fea, targetimg_fea, reweight_net):
     maxdisp=4
     b,c,h,w = refimg_fea.shape
     targetimg_fea = F.unfold(targetimg_fea, (2*maxdisp+1,2*maxdisp+1), padding=maxdisp).view(b,c,2*maxdisp+1, 2*maxdisp+1**2,h,w)
     cost = refimg_fea.view(b,c,h,w)[:,:,np.newaxis, np.newaxis]*targetimg_fea.view(b,c,2*maxdisp+1, 2*maxdisp+1**2,h,w)
-    cost = cost.sum(1)
+    # reweight
+    cost = cost.contiguous() 
+    b, c, ph, pw, h, w = cost.size()
+    cost = cost.view(b*ph*pw, c, h, w)
+    cost = reweight_net(cost)
+    cost = cost.view(b, ph, pw, c, h, w)
+    cost = cost.permute([0,3,1,2,4,5]).contiguous() 
+    # # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
+    #     cost = cost.permute([0,2,3,1,4,5]).contiguous() 
+    #     # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+    #     cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
+    #     cost = matchnet(cost)
+    #     # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+    #     cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
+    #     cost = cost.permute([0,3,1,2,4,5]).contiguous() 
 
+    cost = cost.sum(1)
     b, ph, pw, h, w = cost.size()
     cost = cost.view(b, ph * pw, h, w)/refimg_fea.size(1)
     return cost
