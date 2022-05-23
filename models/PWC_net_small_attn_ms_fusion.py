@@ -1,14 +1,14 @@
-from matplotlib import pyplot as plt
 import torch
 import numpy as np
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import os.path
-from utils.correltaiton import torch_pwc_corr
-from models.SE_block import SEBlock
 from .Dual_attention import DualAttention
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
+
+# from .networks.correlation_package.correlation import Correlation
+from networks.correlation_package.correlation import Correlation
 
 __all__ = [
     'pwc_dc_net'
@@ -24,37 +24,119 @@ def predict_flow(in_planes):
 def deconv(in_planes, out_planes, kernel_size=4, stride=2, padding=1):
     return nn.ConvTranspose2d(in_planes, out_planes, kernel_size, stride, padding, bias=True)
 
+class MultiScaleFeatureFusion(nn.Module):
+    def __init__(self):
+        super(MultiScaleFeatureFusion, self).__init__()
+        self.leakyRELU = nn.LeakyReLU(0.1)
+        self.upconv3_2 = nn.Conv2d(32, 32, kernel_size=1, padding=0, bias=False) # level 3 to level 2
+        self.upconv4_2 = nn.Conv2d(32, 32, kernel_size=1, padding=0, bias=False) # level 4 to level 2
+        self.fusion2 = nn.Sequential(
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            self.leakyRELU,
+            # nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+        self.upconv4_3 = nn.Conv2d(32, 32, kernel_size=1, padding=0, bias=False) 
+        self.downconv2_3 = nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=1, bias=False) 
+        self.fusion3 = nn.Sequential(
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            self.leakyRELU,
+            # nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+        self.upconv5_4 = nn.Conv2d(32, 32, kernel_size=1, padding=0, bias=False) 
+        self.downconv3_4 = nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=2, bias=False) 
+        self.fusion4 = nn.Sequential(
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            self.leakyRELU,
+            # nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+        self.upconv6_5 = nn.Conv2d(32, 32, kernel_size=1, padding=0, bias=False) 
+        self.downconv4_5 = nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=2, bias=False)
+        self.fusion5 = nn.Sequential(
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            self.leakyRELU,
+            # nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+        self.downconv5_6 = nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=2, bias=False)
+        self.downconv4_6 = nn.Sequential(
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=2, bias=False),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=2, bias=False)
+        )
+        self.fusion6 = nn.Sequential(
+            self.leakyRELU,
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            self.leakyRELU,
+            # nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False)
+        )
+
+
+    def forward(self, feats_list):
+        f2, f3, f4, f5, f6 = feats_list
+        f3_to_f2 = self.upconv3_2(F.upsample(f3, (f2.size(2), f2.size(3))))
+        f4_to_f2 = self.upconv4_2(F.upsample(f4, (f2.size(2), f2.size(3))))
+        fusion2 = f2 + f3_to_f2 + f4_to_f2
+        fusion2 = self.fusion2(fusion2)
+
+        f4_to_f3 = self.upconv4_3(F.upsample(f4, (f3.size(2), f3.size(3))))
+        f2_to_f3 = self.downconv2_3(f2)
+        fusion3 = f3 + f4_to_f3 + f2_to_f3
+        fusion3 = self.fusion3(fusion3)
+
+        f5_to_f4 = self.upconv5_4(F.upsample(f5, (f4.size(2), f4.size(3))))
+        f3_to_f4 = self.downconv3_4(f3)
+        fusion4 = f4 + f5_to_f4 + f3_to_f4
+        fusion4 = self.fusion4(fusion4)
+
+        f6_to_f5 = self.upconv6_5(F.upsample(f6, (f5.size(2), f5.size(3))))
+        f4_to_f5 = self.downconv4_5(f4)
+        fusion5 = f5 + f6_to_f5 + f4_to_f5
+        fusion5 = self.fusion5(fusion5)
+
+        f5_to_f6 = self.downconv5_6(f5)
+        f4_to_f6 = self.downconv4_6(f4)
+        fusion6 = f6 + f5_to_f6 + f4_to_f6
+        fusion6 = self.fusion6(fusion6)
+
+        return fusion2, fusion3, fusion4, fusion5, fusion6
 class PWCDCNet(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
     """
-    def __init__(self, share_sebock, md=4):
+    def __init__(self, md=4):
         """
         input: md --- maximum displacement (for correlation. default: 4), after warpping
         """
         super(PWCDCNet,self).__init__()
 
-        self.conv1a  = myconv(3,   16, kernel_size=3, stride=2)
-        self.conv1aa = myconv(16,  16, kernel_size=3, stride=1)
-        self.conv1b  = myconv(16,  16, kernel_size=3, stride=1)
-        self.conv2a  = myconv(16,  32, kernel_size=3, stride=2)
-        self.conv2aa = myconv(32,  32, kernel_size=3, stride=1)
-        self.conv2b  = myconv(32,  32, kernel_size=3, stride=1)
-        self.conv3a  = myconv(32,  64, kernel_size=3, stride=2)
-        self.conv3aa = myconv(64,  64, kernel_size=3, stride=1)
-        self.conv3b  = myconv(64,  64, kernel_size=3, stride=1)
-        self.conv4a  = myconv(64,  96, kernel_size=3, stride=2)
-        self.conv4aa = myconv(96,  96, kernel_size=3, stride=1)
-        self.conv4b  = myconv(96,  96, kernel_size=3, stride=1)
-        self.conv5a  = myconv(96, 128, kernel_size=3, stride=2)
-        self.conv5aa = myconv(128,128, kernel_size=3, stride=1)
-        self.conv5b  = myconv(128,128, kernel_size=3, stride=1)
-        self.conv6aa = myconv(128,196, kernel_size=3, stride=2)
-        self.conv6a  = myconv(196,196, kernel_size=3, stride=1)
-        self.conv6b  = myconv(196,196, kernel_size=3, stride=1)
+        self.conv1a = myconv(3,   16, kernel_size=3, stride=2)
+        self.conv1b = myconv(16,  16, kernel_size=3, stride=1)
+        self.conv2a = myconv(16,  32, kernel_size=3, stride=2)
+        self.conv2b = myconv(32,  32, kernel_size=3, stride=1)
+        self.conv3a = myconv(32,  64, kernel_size=3, stride=2)
+        self.conv3b = myconv(64,  64, kernel_size=3, stride=1)
+        self.conv4a = myconv(64,  96, kernel_size=3, stride=2)
+        self.conv4b = myconv(96,  96, kernel_size=3, stride=1)
+        self.conv5a = myconv(96, 128, kernel_size=3, stride=2)
+        self.conv5b = myconv(128,128, kernel_size=3, stride=1)
+        self.conv6a = myconv(128,196, kernel_size=3, stride=2)
+        self.conv6b = myconv(196,196, kernel_size=3, stride=1)
 
+        self.conv_out2 = myconv(32, 32, kernel_size=1, padding=0)
+        self.conv_out3 = myconv(64, 32, kernel_size=1, padding=0)
+        self.conv_out4 = myconv(96, 32, kernel_size=1, padding=0)
+        self.conv_out5 = myconv(128, 32, kernel_size=1, padding=0)
+        self.conv_out6 = myconv(196, 32, kernel_size=1, padding=0)
+
+        self.corr    = Correlation(pad_size=md, kernel_size=1, max_displacement=md, stride1=1, stride2=1, corr_multiply=1)
         self.leakyRELU = nn.LeakyReLU(0.1)
-        
+        self.multiscale_feature_fusion = MultiScaleFeatureFusion()
 
         nd = (2*md+1)**2
         dd = np.cumsum([128,128,96,64,32])
@@ -64,17 +146,6 @@ class PWCDCNet(nn.Module):
         self.cascade_attn2 = DualAttention(96)
         self.cascade_attn3 = DualAttention(64)
         self.cascade_attn4 = DualAttention(32)
-
-        if share_sebock:
-            self.se_block0 = SEBlock(nd, reduction_ratio=16)
-            self.se_block4 = self.se_block3 = self.se_block2 = self.se_block1 = self.se_block0
-        else:
-            self.se_block0 = SEBlock(196, reduction_ratio=16)
-            self.se_block1 = SEBlock(128, reduction_ratio=16)
-            self.se_block2 = SEBlock(96, reduction_ratio=16)
-            self.se_block3 = SEBlock(64, reduction_ratio=16)
-            self.se_block4 = SEBlock(32, reduction_ratio=16)
-
 
         od = nd
         self.conv6_0 = myconv(od,      128, kernel_size=3, stride=1)
@@ -86,7 +157,7 @@ class PWCDCNet(nn.Module):
         self.deconv6 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
         self.upfeat6 = deconv(32, 2, kernel_size=4, stride=2, padding=1)
         
-        od = nd+128+4
+        od = nd+32+4
         self.conv5_0 = myconv(od,      128, kernel_size=3, stride=1)
         self.conv5_1 = myconv(128,128, kernel_size=3, stride=1)
         self.conv5_2 = myconv(128,96,  kernel_size=3, stride=1)
@@ -96,7 +167,7 @@ class PWCDCNet(nn.Module):
         self.deconv5 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
         self.upfeat5 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
-        od = nd+96+4
+        # od = nd+96+4
         self.conv4_0 = myconv(od,      128, kernel_size=3, stride=1)
         self.conv4_1 = myconv(128,128, kernel_size=3, stride=1)
         self.conv4_2 = myconv(128,96,  kernel_size=3, stride=1)
@@ -106,7 +177,7 @@ class PWCDCNet(nn.Module):
         self.deconv4 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
         self.upfeat4 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
-        od = nd+64+4
+        # od = nd+64+4
         self.conv3_0 = myconv(od,      128, kernel_size=3, stride=1)
         self.conv3_1 = myconv(128,128, kernel_size=3, stride=1)
         self.conv3_2 = myconv(128,96,  kernel_size=3, stride=1)
@@ -116,7 +187,7 @@ class PWCDCNet(nn.Module):
         self.deconv3 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
         self.upfeat3 = deconv(32, 2, kernel_size=4, stride=2, padding=1) 
         
-        od = nd+32+4
+        # od = nd+32+4
         self.conv2_0 = myconv(od,      128, kernel_size=3, stride=1)
         self.conv2_1 = myconv(128,128, kernel_size=3, stride=1)
         self.conv2_2 = myconv(128,96,  kernel_size=3, stride=1)
@@ -185,24 +256,35 @@ class PWCDCNet(nn.Module):
         im2 = x[:,3:,:,:]
         H, W = im1.shape[2:4]
         
-        c11 = self.conv1b(self.conv1aa(self.conv1a(im1)))
-        c21 = self.conv1b(self.conv1aa(self.conv1a(im2)))
-        c12 = self.conv2b(self.conv2aa(self.conv2a(c11)))
-        c22 = self.conv2b(self.conv2aa(self.conv2a(c21)))
-        c13 = self.conv3b(self.conv3aa(self.conv3a(c12)))
-        c23 = self.conv3b(self.conv3aa(self.conv3a(c22)))
-        c14 = self.conv4b(self.conv4aa(self.conv4a(c13)))
-        c24 = self.conv4b(self.conv4aa(self.conv4a(c23)))
-        c15 = self.conv5b(self.conv5aa(self.conv5a(c14)))
-        c25 = self.conv5b(self.conv5aa(self.conv5a(c24)))
-        c16 = self.conv6b(self.conv6a(self.conv6aa(c15)))
-        c26 = self.conv6b(self.conv6a(self.conv6aa(c25)))
+        c11 = self.conv1b(self.conv1a(im1))
+        c21 = self.conv1b(self.conv1a(im2))
+        c12 = self.conv2b(self.conv2a(c11))
+        c22 = self.conv2b(self.conv2a(c21))
+        c13 = self.conv3b(self.conv3a(c12))
+        c23 = self.conv3b(self.conv3a(c22))
+        c14 = self.conv4b(self.conv4a(c13))
+        c24 = self.conv4b(self.conv4a(c23))
+        c15 = self.conv5b(self.conv5a(c14))
+        c25 = self.conv5b(self.conv5a(c24))
+        c16 = self.conv6b(self.conv6a(c15))
+        c26 = self.conv6b(self.conv6a(c25))
 
+        c12 = self.conv_out2(c12)
+        c22 = self.conv_out2(c22)
+        c13 = self.conv_out3(c13)
+        c23 = self.conv_out3(c23)
+        c14 = self.conv_out4(c14)
+        c24 = self.conv_out4(c24)
+        c15 = self.conv_out5(c15)
+        c25 = self.conv_out5(c25)
+        c16 = self.conv_out6(c16)
+        c26 = self.conv_out6(c26)
 
-        corr6 = torch_pwc_corr(c16, c26, self.se_block0) 
-        # corr6 = self.se_block0(corr6)
+        c12, c13, c14, c15, c16 = self.multiscale_feature_fusion([c12,c13,c14,c15,c16])
+        c22, c23, c24, c25, c26 = self.multiscale_feature_fusion([c22,c23,c24,c25,c26])
+
+        corr6 = self.corr(c16, c26) 
         corr6 = self.leakyRELU(corr6)  
-
         x = self.conv6_0(corr6)
         x = self.cascade_attn0(x)
         x = torch.cat((x, corr6), 1)
@@ -223,8 +305,7 @@ class PWCDCNet(nn.Module):
 
         
         warp5 = self.warp(c25, up_flow6*0.625)
-        corr5 = torch_pwc_corr(c15, warp5, self.se_block1) 
-        # corr5 = self.se_block1(corr5)
+        corr5 = self.corr(c15, warp5) 
         corr5 = self.leakyRELU(corr5)
         x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
         x = self.conv5_0(x)
@@ -243,8 +324,7 @@ class PWCDCNet(nn.Module):
 
        
         warp4 = self.warp(c24, up_flow5*1.25)
-        corr4 = torch_pwc_corr(c14, warp4, self.se_block2)  
-        # corr4 = self.se_block2(corr4)
+        corr4 = self.corr(c14, warp4)  
         corr4 = self.leakyRELU(corr4)
         x = torch.cat((corr4, c14, up_flow5, up_feat5), 1)
         x = self.conv4_0(x)
@@ -263,9 +343,10 @@ class PWCDCNet(nn.Module):
 
 
         warp3 = self.warp(c23, up_flow4*2.5)
-        corr3 = torch_pwc_corr(c13, warp3, self.se_block3)
-        # corr3 = self.se_block3(corr3) 
+        corr3 = self.corr(c13, warp3) 
         corr3 = self.leakyRELU(corr3)
+        
+
         x = torch.cat((corr3, c13, up_flow4, up_feat4), 1)
         x = self.conv3_0(x)
         x = self.cascade_attn0(x)
@@ -283,8 +364,8 @@ class PWCDCNet(nn.Module):
 
 
         warp2 = self.warp(c22, up_flow3*5.0) 
-        corr2 = torch_pwc_corr(c12, warp2, self.se_block4)
-        # corr2 = self.se_block4(corr2)
+        corr2 = self.corr(c12, warp2)
+        corr2 = self.leakyRELU(corr2)
         x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
         x = self.conv2_0(x)
         x = self.cascade_attn0(x)
