@@ -1,4 +1,4 @@
-from matplotlib.lines import Line2D
+from Forward_Warp.forward_warp import forward_warp
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -58,7 +58,7 @@ def SSIM(x, y):
     
     return torch.clamp((1 - SSIM) / 2, 0, 1)
 
-def cal_grad2_error(flo, image, beta, edge_weight=10.0):
+def cal_grad2_error(flo, image, beta):
     """
     Calculate the image-edge-aware second-order smoothness loss for flo 
     """
@@ -70,8 +70,8 @@ def cal_grad2_error(flo, image, beta, edge_weight=10.0):
     
     
     img_grad_x, img_grad_y = gradient(image)
-    weights_x = torch.exp(-edge_weight * torch.mean(torch.abs(img_grad_x), 1, keepdim=True))
-    weights_y = torch.exp(-edge_weight * torch.mean(torch.abs(img_grad_y), 1, keepdim=True))
+    weights_x = torch.exp(-10.0 * torch.mean(torch.abs(img_grad_x), 1, keepdim=True))
+    weights_y = torch.exp(-10.0 * torch.mean(torch.abs(img_grad_y), 1, keepdim=True))
 
     dx, dy = gradient(flo)
     dx2, dxdy = gradient(dx)
@@ -130,34 +130,6 @@ def get_mask(forward, backward, border_mask):
     
     flow_bw_warped = Resample2d()(flow_bw, flow_fw)
     flow_fw_warped = Resample2d()(flow_fw, flow_bw)
-    flow_diff_fw = flow_fw + flow_bw_warped
-    flow_diff_bw = flow_bw + flow_fw_warped
-    occ_thresh =  0.01 * mag_sq + 0.5
-    # fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).type(torch.cuda.FloatTensor)
-    # fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).type(torch.cuda.FloatTensor)
-    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
-    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
-    
-    if border_mask == None:
-        mask_fw = create_outgoing_mask(flow_fw).to(forward.device)
-        mask_bw = create_outgoing_mask(flow_bw).to(forward.device)
-    else:
-        mask_fw = border_mask
-        mask_bw = border_mask
-    # print(mask_fw.device)
-    # print(fb_occ_bw.device)
-    fw = mask_fw * (1 - fb_occ_fw)
-    bw = mask_bw * (1 - fb_occ_bw)
-
-    return fw, bw, fb_occ_fw, fb_occ_bw
-
-def get_mask_wo_resample(forward, backward, border_mask):
-    flow_fw = forward
-    flow_bw = backward
-    mag_sq = length_sq(flow_fw) + length_sq(flow_bw)
-    
-    flow_bw_warped = flow_warp(flow_bw, flow_fw)
-    flow_fw_warped = flow_warp(flow_fw, flow_bw)
     flow_diff_fw = flow_fw + flow_bw_warped
     flow_diff_bw = flow_bw + flow_fw_warped
     occ_thresh =  0.01 * mag_sq + 0.5
@@ -307,114 +279,9 @@ def get_soft_mask(backward_flow, fw, slices, eps=1e-3, neg_disp=False):
     mask = torch.clamp(mask, 0, 1)
     return mask
 
-def disparity_to_flow(disp):
-    zero = torch.zeros_like(disp)
-    flow = torch.cat((disp, zero), 1)
-    return flow
-
-def plot_grad_flow(named_parameters):
-    ave_grads = []
-    layers = []
-    plt.figure(figsize=(40,15))
-    for n, p in named_parameters:
-        if 'deconv2' in n:
-            continue
-        if(p.requires_grad) and ("bias" not in n):
-            layers.append(n)
-            ave_grads.append(p.grad.abs().mean().cpu().data.numpy())
-    plt.plot(ave_grads, alpha=0.3, color="b")
-    plt.hlines(0, 0, len(ave_grads)+1, linewidth=1, color="k" )
-    plt.xticks(range(0,len(ave_grads), 1), layers, rotation="vertical")
-    plt.xlim(xmin=0, xmax=len(ave_grads))
-    plt.xlabel("Layers")
-    plt.ylabel("average gradient")
-    plt.title("Gradient flow")
-    plt.grid(True)
-    plt.savefig('visualization/grad_flow.png')
-
-def photo_loss_function(diff, mask, q, charbonnier_or_abs_robust, averge=True):
-    if charbonnier_or_abs_robust:
-        p = ((diff) ** 2 + 1e-6).pow(q)
-        p = p * mask
-        if averge:
-            p = p.mean()
-            ap = mask.mean()
-        else:
-            p = p.sum()
-            ap = mask.sum()
-        loss_mean = p / (ap * 2 + 1e-6)
-        
-    else:
-        diff = (torch.abs(diff) + 0.01).pow(q)
-        diff = diff * mask
-        diff_sum = torch.sum(diff)
-        loss_mean = diff_sum / (torch.sum(mask) * 2 + 1e-6)
-       
-    return loss_mean
-
-def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, averge=True, max_disp=3):
-    patch_size = 2 * max_disp + 1
-
-    def _ternary_transform_torch(image):
-        R, G, B = torch.split(image, 1, 1)
-        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B) * 255  # * 255  # convert to gray
-        # intensities = tf.image.rgb_to_grayscale(image) * 255
-        out_channels = patch_size * patch_size
-        w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))  # h,w,1,out_c
-        w_ = np.transpose(w, (3, 2, 0, 1))  # 1,out_c,h,w
-        weight = torch.from_numpy(w_).float()
-        if image.is_cuda:
-            weight = weight.cuda()
-        patches_torch = torch.conv2d(input=intensities_torch, weight=weight, bias=None, stride=[1, 1], padding=[max_disp, max_disp])
-        transf_torch = patches_torch - intensities_torch
-        transf_norm_torch = transf_torch / torch.sqrt(0.81 + transf_torch ** 2)
-        return transf_norm_torch
-
-    def _hamming_distance_torch(t1, t2):
-        dist = (t1 - t2) ** 2
-        dist = torch.sum(dist / (0.1 + dist), 1, keepdim=True)
-        return dist
-
-    def create_mask_torch(tensor, paddings):
-        shape = tensor.shape  # N,c, H,W
-        inner_width = shape[2] - (paddings[0][0] + paddings[0][1])
-        inner_height = shape[3] - (paddings[1][0] + paddings[1][1])
-        inner_torch = torch.ones([shape[0], shape[1], inner_width, inner_height]).float()
-        if tensor.is_cuda:
-            inner_torch = inner_torch.cuda()
-        mask2d = F.pad(inner_torch, [paddings[0][0], paddings[0][1], paddings[1][0], paddings[1][1]])
-        return mask2d
-
-    img1 = _ternary_transform_torch(img1)
-    img1_warp = _ternary_transform_torch(img1_warp)
-    dist = _hamming_distance_torch(img1, img1_warp)
-    transform_mask = create_mask_torch(mask, [[max_disp, max_disp],
-                                                [max_disp, max_disp]])
-    census_loss = photo_loss_function(diff=dist, mask=mask * transform_mask, q=q,
-                                            charbonnier_or_abs_robust=charbonnier_or_abs_robust, averge=averge)
-    return census_loss
-
-def upsample_flow(inputs, target_size=None, target_flow=None, mode="bilinear"):
-    if target_size is not None:
-        h, w = target_size
-    elif target_flow is not None:
-        _, _, h, w = target_flow.size()
-    else:
-        raise ValueError('wrong input')
-    _, _, h_, w_ = inputs.size()
-    res = torch.nn.functional.interpolate(inputs, [h, w], mode=mode, align_corners=True)
-    res[:, 0, :, :] *= (w / w_)
-    res[:, 1, :, :] *= (h / h_)
-    return res
-
-def photo_loss_abs_robust(x, y, occ_mask, photo_loss_delta=0.4):
-    photo_diff = x - y
-    loss_diff = (torch.abs(photo_diff) + 0.01).pow(photo_loss_delta)
-    photo_loss = torch.sum(loss_diff * occ_mask) / (torch.sum(occ_mask) + 1e-6)
-    return photo_loss
-
-def get_selfsup_transformations(args, crop_size=32):
-    return transforms.Compose([
-        transforms.CenterCrop((args.input_height - 2 * crop_size, args.input_width - 2 * crop_size)),
-        # transforms.Resize([args.input_height, args.input_width]),
-    ])
+def generate_flow_left(self, disp):
+    b, _, h, w = disp.shape
+    zero = torch.zero([b, 1, h, w]).to(disp.device)
+    ltr_flow = -disp * w
+    # ltr_flow = tf.concat([ltr_flow, zero_flow], axis=3)
+    return ltr_flow
