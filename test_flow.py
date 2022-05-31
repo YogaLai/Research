@@ -12,9 +12,10 @@ import random
 from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
-from models.PWC_net_small_attn import *
-from models.PWC_net_small_attn import PWCDCNet
+# from models.PWC_net_small_attn import PWCDCNet
+from models.PWC_net_dc_cost_uflow import PWCDCNet
 from utils.scene_dataloader import *
+from collections import OrderedDict
 from utils.utils import *
 
 def get_args():
@@ -31,13 +32,19 @@ def get_args():
 
 args = get_args()
 
+net = PWCDCNet().cuda()
+# args.input_width = 832
+args.input_width = 768
 checkpoint = torch.load(args.checkpoint_path)
-if args.model_name == 'monodepth':
-    net = MonodepthNet().cuda()
-elif args.model_name == 'pwc':
-    net = pwc_dc_net().cuda()
-    args.input_width = 832
-net.load_state_dict(checkpoint['state_dict'])
+if any('module' in s for s in checkpoint['state_dict'].keys()):
+    state_dict = OrderedDict()
+    for k, v in checkpoint['state_dict'].items():
+        name = k[7:] # remove `module.`
+        state_dict[name] = v
+else:
+    state_dict = checkpoint['state_dict']
+net.load_state_dict(state_dict)
+net = net.eval()
 
 former_test, latter_test, flow = get_flow_data(args.filenames_file, args.data_path)
 TestFlowLoader = torch.utils.data.DataLoader(
