@@ -57,7 +57,7 @@ def SSIM(x, y):
     
     return torch.clamp((1 - SSIM) / 2, 0, 1)
 
-def cal_grad2_error(flo, image, beta):
+def cal_grad2_error(flo, image, beta, edge_weight=10.0):
     """
     Calculate the image-edge-aware second-order smoothness loss for flo 
     """
@@ -69,8 +69,8 @@ def cal_grad2_error(flo, image, beta):
     
     
     img_grad_x, img_grad_y = gradient(image)
-    weights_x = torch.exp(-10.0 * torch.mean(torch.abs(img_grad_x), 1, keepdim=True))
-    weights_y = torch.exp(-10.0 * torch.mean(torch.abs(img_grad_y), 1, keepdim=True))
+    weights_x = torch.exp(-edge_weight * torch.mean(torch.abs(img_grad_x), 1, keepdim=True))
+    weights_y = torch.exp(-edge_weight * torch.mean(torch.abs(img_grad_y), 1, keepdim=True))
 
     dx, dy = gradient(flo)
     dx2, dxdy = gradient(dx)
@@ -137,9 +137,9 @@ def get_mask(forward, backward, border_mask):
     fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
     fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
     
-    if border_mask is None:
-        mask_fw = create_outgoing_mask(flow_fw)
-        mask_bw = create_outgoing_mask(flow_bw)
+    if border_mask == None:
+        mask_fw = create_outgoing_mask(flow_fw).to(forward.device)
+        mask_bw = create_outgoing_mask(flow_bw).to(forward.device)
     else:
         mask_fw = border_mask
         mask_bw = border_mask
@@ -148,7 +148,7 @@ def get_mask(forward, backward, border_mask):
     fw = mask_fw * (1 - fb_occ_fw)
     bw = mask_bw * (1 - fb_occ_bw)
 
-    return fw, bw, flow_diff_fw, flow_diff_bw
+    return fw, bw, fb_occ_fw, fb_occ_bw
 
 def get_mask_wo_resample(forward, backward, border_mask):
     flow_fw = forward
@@ -368,7 +368,7 @@ def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, a
 
     def _ternary_transform_torch(image):
         R, G, B = torch.split(image, 1, 1)
-        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B)  # * 255  # convert to gray
+        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B) * 255  # * 255  # convert to gray
         # intensities = tf.image.rgb_to_grayscale(image) * 255
         out_channels = patch_size * patch_size
         w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))  # h,w,1,out_c
@@ -423,3 +423,9 @@ def photo_loss_abs_robust(x, y, occ_mask, photo_loss_delta=0.4):
     loss_diff = (torch.abs(photo_diff) + 0.01).pow(photo_loss_delta)
     photo_loss = torch.sum(loss_diff * occ_mask) / (torch.sum(occ_mask) + 1e-6)
     return photo_loss
+
+def get_selfsup_transformations(args, crop_size=32):
+    return transforms.Compose([
+        transforms.CenterCrop((args.input_height - 2 * crop_size, args.input_width - 2 * crop_size)),
+        # transforms.Resize([args.input_height, args.input_width]),
+    ])
