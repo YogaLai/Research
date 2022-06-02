@@ -1,4 +1,3 @@
-from matplotlib.lines import Line2D
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -198,7 +197,7 @@ def make_pyramid(image, num_scales):
         
     return scale_image
 
-def evaluate_flow(flow, flow_gt, valid_mask=None):
+def evaluate_flow(flow, flow_gt, valid_mask=None, noc_mask=None):
 
     if valid_mask is None:
         tmp = np.multiply(flow_gt[0,:,:], flow_gt[1,:,:])
@@ -221,6 +220,18 @@ def evaluate_flow(flow, flow_gt, valid_mask=None):
 
     EPE = np.multiply(np.sqrt(du2 + dv2), valid_mask)
     EPE_avg = np.sum(EPE) / N
+
+    EPE_noc = np.multiply(np.sqrt(du2 + dv2), noc_mask)
+    EPE_noc = np.sum(EPE_noc) / np.sum(noc_mask)
+    occ_idx = (valid_mask.astype(np.uint8)-(noc_mask).astype(np.uint8))
+    EPE_occ = np.multiply(np.sqrt(du2 + dv2), occ_idx) 
+    EPE_occ = np.sum(EPE_occ) / max(np.sum(occ_idx), 1.0)
+
+    # epe_all = np.sum(epe_map*mask)/np.sum(mask)
+    # epe_noc = np.sum(epe_map*noc_mask)/np.sum(noc_mask)
+    # idx = (mask.astype(np.uint8)-(noc_mask).astype(np.uint8))
+    # epe_occ = np.sum(epe_map*idx) / max(np.sum(idx), 1.0)
+
     
     ### compute FL
     bad_pixels = np.logical_and(
@@ -228,7 +239,7 @@ def evaluate_flow(flow, flow_gt, valid_mask=None):
         (EPE / np.sqrt(np.sum(np.square(flow_gt), axis=0)) + 1e-5) > 0.05)
     FL_avg = bad_pixels.sum() / valid_mask.sum()
 
-    return EPE_avg, FL_avg
+    return EPE_avg, EPE_noc, EPE_occ, FL_avg
 
 def flow_warp(tenInput, tenFlow):
     tenHor = torch.linspace(-1.0 + (1.0 / tenFlow.shape[3]), 1.0 - (1.0 / tenFlow.shape[3]), tenFlow.shape[3]).view(1, 1, 1, -1).expand(-1, -1, tenFlow.shape[2], -1)
@@ -392,7 +403,7 @@ def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, a
                                                 [max_disp, max_disp]])
     census_loss = photo_loss_function(diff=dist, mask=mask * transform_mask, q=q,
                                             charbonnier_or_abs_robust=charbonnier_or_abs_robust, averge=averge)
-    return census_loss
+    return census_loss, dist
 
 def upsample_flow(inputs, target_size=None, target_flow=None, mode="bilinear"):
     if target_size is not None:
