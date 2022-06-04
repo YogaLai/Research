@@ -13,7 +13,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import cv2
 # from models.PWC_net_small_attn import PWCDCNet
-from models.PWC_net_dc_cost_uflow import PWCDCNet
+from models.UFlow import PWCDCNet
+# from models.PWC_net_dc_cost_uflow import PWCDCNet
 from utils.scene_dataloader import *
 from collections import OrderedDict
 from utils.utils import *
@@ -46,15 +47,20 @@ else:
 net.load_state_dict(state_dict)
 net = net.eval()
 
+noc_filename = args.filenames_file.replace('occ_', '')
 former_test, latter_test, flow = get_flow_data(args.filenames_file, args.data_path)
+former_test, latter_test, noc_flow = get_flow_data(noc_filename, args.data_path)
 TestFlowLoader = torch.utils.data.DataLoader(
-        myImageFolder(former_test, latter_test, flow, args),
+        myImageFolder(former_test, latter_test, flow, args, noc_flow=noc_flow),
         batch_size = 1, shuffle = False, num_workers = 1, drop_last = False)
+# noc_flows, noc_masks = get_gt_flows(noc_flow_fn)
 
 total_error = 0
+total_epe_noc = 0
+total_epe_occ = 0
 fl_error = 0
 num_test = 0
-for batch_idx, (left, right, gt, mask, h, w) in enumerate(TestFlowLoader, 0):
+for batch_idx, (left, right, gt, noc_gt, mask, h, w) in enumerate(TestFlowLoader, 0):
     
     left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
     right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
@@ -69,17 +75,24 @@ for batch_idx, (left, right, gt, mask, h, w) in enumerate(TestFlowLoader, 0):
         disp_est_scale = net(model_input)
 
     mask = np.ceil(np.clip(np.abs(gt[0,0]), 0, 1))
+    noc_mask = np.ceil(np.clip(np.abs(noc_gt[0,0]), 0, 1))
 
     disp_ori_scale = nn.UpsamplingBilinear2d(size=(int(h), int(w)))(disp_est_scale[0][:1])
     disp_ori_scale[0,0] = disp_ori_scale[0,0] * int(w) / args.input_width
     disp_ori_scale[0,1] = disp_ori_scale[0,1] * int(h) / args.input_height
 
-    error, fl = evaluate_flow(disp_ori_scale[0].data.cpu().numpy(), gt[0].numpy(), mask.numpy())
-    total_error += error
+    epe_all, epe_noc, epe_occ, fl = evaluate_flow(disp_ori_scale[0].data.cpu().numpy(), gt[0].numpy(), mask.numpy(), noc_mask.numpy())
+    total_error += epe_all
+    total_epe_noc += epe_noc
+    total_epe_occ += epe_occ
     fl_error += fl
     num_test += 1
     
 total_error /= num_test
+total_epe_noc /= num_test
+total_epe_occ /= num_test
 fl_error /= num_test
 print("The average EPE is : ", total_error)
+print("The EPE-noc is : ", total_epe_noc)
+print("The EPE-occ is : ", total_epe_occ)
 print("The average Fl is : ", fl_error)
