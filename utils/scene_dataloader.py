@@ -156,10 +156,11 @@ class myCycleImageFolder(data.Dataset):
         return len(self.left1)
     
 class myImageFolder(data.Dataset):
-    def __init__(self, left, right, flow, param, disp_gt=None, resize=True):
+    def __init__(self, left, right, flow, param, noc_flow=None, disp_gt=None, resize=True):
         self.right = right
         self.left = left
         self.flow = flow
+        self.noc_flow = noc_flow
         self.param = param
         self.disp_gt = disp_gt
         self.resize = resize
@@ -175,7 +176,13 @@ class myImageFolder(data.Dataset):
             print('Erro open PNG: ', left)
             print('Erro open PNG: ', right)
             exit()
-      
+
+        # w,h = left_image.size
+        # th = int(int(h / 64) * 64)
+        # tw = int(int(w / 64) * 64)
+        # param.input_width = tw
+        # param.input_height = th
+ 
         process = get_transform(param, self.resize)
         left_image = process(left_image)
         right_image = process(right_image)
@@ -194,6 +201,22 @@ class myImageFolder(data.Dataset):
             f = torch.from_numpy(flo_img.transpose((2,0,1)))
             mask = torch.from_numpy((flow_image[:,:,0] == 1).astype(np.float32)).type(torch.FloatTensor)
 
+            if self.noc_flow != None:
+                flow = self.noc_flow[index]
+                flow_image = cv2.imread(flow, -1)
+                h, w, _ = flow_image.shape
+                flo_img = flow_image[:,:,2:0:-1].astype(np.float32)
+                invalid = (flow_image[:,:,0] == 0)
+
+                flo_img = (flo_img - 32768) / 64
+                flo_img[np.abs(flo_img) < 1e-10] = 1e-10
+                flo_img[invalid, :] = 0
+
+                noc_f = torch.from_numpy(flo_img.transpose((2,0,1))).type(torch.FloatTensor)
+                # mask = torch.from_numpy((flow_image[:,:,0] == 1).astype(np.float32)).type(torch.FloatTensor)
+
+                return left_image, right_image, f.type(torch.FloatTensor), noc_f, mask, h, w
+                
             return left_image, right_image, f.type(torch.FloatTensor), mask, h, w
         
         if self.disp_gt is not None:
@@ -223,3 +246,22 @@ def get_kitti_2015(dataset_path):
         gt.append(os.path.join(dataset_path, "disp_occ_0", str(i).zfill(6) + "_10.png"))
     
     return left_image, right_image, gt
+
+def get_gt_flows(flow_fns):
+    gt_flows = []
+    masks = []
+    for flow_fn in flow_fns:
+        flow_image = cv2.imread(flow_fn, -1)
+        h, w, _ = flow_image.shape
+        flo_img = flow_image[:,:,2:0:-1].astype(np.float32)
+        invalid = (flow_image[:,:,0] == 0)
+
+        flo_img = (flo_img - 32768) / 64
+        flo_img[np.abs(flo_img) < 1e-10] = 1e-10
+        flo_img[invalid, :] = 0
+
+        f = torch.from_numpy(flo_img.transpose((2,0,1)))
+        mask = torch.from_numpy((flow_image[:,:,0] == 1).astype(np.float32)).type(torch.FloatTensor)
+        gt_flows.append(gt_flows)
+        masks.append(mask)
+    return gt_flows, masks
