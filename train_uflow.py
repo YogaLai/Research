@@ -4,7 +4,7 @@ import argparse
 # from models.PWC_net import *
 # from models.PWC_net_concat_cv import PWCDCNet
 # from models.PWC_net_small_attn import PWCDCNet
-from models.UFlow import PWCDCNet
+from models.UFlow_wo_residual import PWCDCNet
 # from models.PWC_net_small_attn_LD_biup import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -20,7 +20,7 @@ def get_args():
     parser.add_argument('--split',                     type=str,   help='data split, kitti or eigen',         default='kitti')
     parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--gt_path',                   type=str,   help='path to ground truth disparities',   required=True)
-    parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
+    parser.add_argument('--data_path',                 type=str,   help='path to the stereo data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
     parser.add_argument('--test_filenames_file',       type=str,   help='path to the testing filenames text file', required=True)
     parser.add_argument('--input_height',              type=int,   help='input height', default=256)
@@ -46,6 +46,7 @@ def get_args():
     args = parser.parse_args()
     return args
 
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(71)
 torch.cuda.manual_seed(71)
@@ -80,16 +81,24 @@ TestImageLoader = torch.utils.data.DataLoader(
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
 
-if torch.cuda.device_count() >= 2:
-    net = nn.DataParallel(net)
+flow_filenames_file = 'utils/filenames/kitti_flow_val_files_occ_200.txt'
+flow_noc_filename = flow_filenames_file.replace('occ_', '')
+former_test, latter_test, flow = get_flow_data(flow_filenames_file, args.gt_path)
+former_test, latter_test, noc_flow = get_flow_data(flow_noc_filename, args.gt_path)
+TestFlowLoader = torch.utils.data.DataLoader(
+        myImageFolder(former_test, latter_test, flow, args, noc_flow=noc_flow),
+        batch_size = 1, shuffle = False, num_workers = 1, drop_last = False)
 
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
     net.load_state_dict(checkpoint['state_dict'])
     epoch = checkpoint['epoch']
-    scheduler = checkpoint['scheduler']
+    # scheduler = checkpoint['scheduler']
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
+
+if torch.cuda.device_count() >= 2:
+    net = nn.DataParallel(net)
 
 def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
     slices = []
@@ -306,7 +315,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
     print("The model of epoch ", epoch, "has been saved.")
 
 
-def test(dataloader, net, gt):
+def test_stereo(dataloader, net, gt, writer, epoch):
     pred_disparities = []
     net.eval()
     with torch.no_grad():
@@ -369,21 +378,77 @@ def test(dataloader, net, gt):
             # sq_rel[i] = np.mean(((gt_depth[mask] - pred_depth[mask])**2) / gt_depth[mask])
             abs_rel[i] = np.mean(np.abs(gt_depth[mask] - pred_depth[mask]) / gt_depth[mask])
 
-    print(abs_rel.mean())
-    return abs_rel.mean()
+    abs_rel = abs_rel.mean()
+    print('Abs_rel: ', abs_rel)
+    writer.add_scalar('Test/abs_rel', abs_rel, epoch)
+    return abs_rel
 
-best_metric = 10000
+def test_flow(dataloader, net, writer, epoch):
+    total_error = 0
+    total_epe_noc = 0
+    total_epe_occ = 0
+    fl_error = 0
+    num_test = 0
+    for left, right, gt, noc_gt, mask, h, w in dataloader:
+        left_batch = torch.cat((left, torch.from_numpy(np.flip(left.numpy(), 3).copy())), 0)
+        right_batch = torch.cat((right, torch.from_numpy(np.flip(right.numpy(), 3).copy())), 0)
+        
+        with torch.no_grad():
+            left = left_batch.cuda()
+            right = right_batch.cuda()
+            model_input = torch.cat((left, right), 1)
+            disp_est_scale = net(model_input)
+
+            mask = np.ceil(np.clip(np.abs(gt[0,0]), 0, 1))
+            noc_mask = np.ceil(np.clip(np.abs(noc_gt[0,0]), 0, 1))
+
+            disp_ori_scale = nn.UpsamplingBilinear2d(size=(int(h), int(w)))(disp_est_scale[0][:1])
+            disp_ori_scale[0,0] = disp_ori_scale[0,0] * int(w) / args.input_width
+            disp_ori_scale[0,1] = disp_ori_scale[0,1] * int(h) / args.input_height
+
+            epe_all, epe_noc, epe_occ, fl = evaluate_flow(disp_ori_scale[0].data.cpu().numpy(), gt[0].numpy(), mask.numpy(), noc_mask.numpy())
+            total_error += epe_all
+            total_epe_noc += epe_noc
+            total_epe_occ += epe_occ
+            fl_error += fl
+            num_test += 1
+
+    total_error /= num_test 
+    total_epe_noc /= num_test
+    total_epe_occ /= num_test
+    fl_error /= num_test
+    print("EPE-noc: ", total_epe_noc)
+    print("EPE-all: ", total_error)
+    print("EPE-occ: ", total_epe_occ)
+    print("Fl: ", fl_error)
+
+    writer.add_scalar('Test/EPE-noc', total_epe_noc, epoch)
+    writer.add_scalar('Test/EPE-all', total_error, epoch)
+    writer.add_scalar('Test/EPE-occ', total_epe_occ, epoch)
+    writer.add_scalar('Test/Fl', fl_error, epoch)
+
+    return total_error
+
+
+best_stereo_metric = 10000
+best_flow_metric = 10000
 gt_disparities = load_gt_disp_kitti(args.gt_path)
 start_epoch = epoch
 for epoch in range(start_epoch, args.num_epochs):
     print(f"Epoch {epoch+1}\n-------------------------------")
     train(epoch, CycleLoader, net, optimizer, scheduler, writer, args)
     if args.split == 'kitti':
-        err = test(TestImageLoader, net, gt_disparities)
-    if err < best_metric:
-        best_metric = err
-        str_err = "{:.4f}".format(err)
+        stereo_err = test_stereo(TestImageLoader, net, gt_disparities, writer, epoch)
+        flow_err = test_flow(TestFlowLoader, net, writer, epoch)
+    if stereo_err < best_stereo_metric:
+        best_stereo_metric = stereo_err
+        str_err = "{:.4f}".format(stereo_err)
         # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
         state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
         torch.save(state, "savemodel/" + args.exp_name + "/best_" + str_err + "_epoch" + str(epoch))
-    writer.add_scalar('Test/abs_rel', err, epoch)
+    if flow_err < best_flow_metric:
+        best_flow_metric = flow_err
+        str_err = "{:.4f}".format(flow_err)
+        # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+        state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+        torch.save(state, "savemodel/" + args.exp_name + "/flow_best_" + str_err + "_epoch" + str(epoch))
