@@ -143,8 +143,29 @@ def get_mask(forward, backward, border_mask):
     else:
         mask_fw = border_mask
         mask_bw = border_mask
-    # print(mask_fw.device)
-    # print(fb_occ_bw.device)
+    fw = mask_fw * (1 - fb_occ_fw)
+    bw = mask_bw * (1 - fb_occ_bw)
+
+    return fw, bw, fb_occ_fw, fb_occ_bw
+
+def get_mix_mask(forward, backward, border_mask, flow_slices):
+    flow_fw = forward
+    flow_bw = backward
+    mag_sq = length_sq(flow_fw) + length_sq(flow_bw)
+    
+    flow_bw_warped = Resample2d()(flow_bw, flow_fw)
+    flow_fw_warped = Resample2d()(flow_fw, flow_bw)
+    flow_diff_fw = flow_fw + flow_bw_warped
+    flow_diff_bw = flow_bw + flow_fw_warped
+    occ_thresh =  0.01 * mag_sq + 0.5
+    fb_occ_fw = (length_sq(flow_diff_fw) > occ_thresh).to(forward.device).float()
+    fb_occ_bw = (length_sq(flow_diff_bw) > occ_thresh).to(backward.device).float()
+    
+    mask_fw = create_outgoing_mask(flow_fw).to(forward.device)
+    mask_bw = create_outgoing_mask(flow_bw).to(forward.device)
+    mask_fw[flow_slices] = border_mask[flow_slices]
+    mask_bw[flow_slices] = border_mask[flow_slices]
+
     fw = mask_fw * (1 - fb_occ_fw)
     bw = mask_bw * (1 - fb_occ_bw)
 
@@ -218,13 +239,13 @@ def evaluate_flow(flow, flow_gt, valid_mask=None, noc_mask=None):
     du2 = np.multiply(du, du)
     dv2 = np.multiply(dv, dv)
 
-    EPE = np.multiply(np.sqrt(du2 + dv2), valid_mask)
-    EPE_avg = np.sum(EPE) / N
+    EPE = np.sqrt(du2 + dv2)
+    EPE_all = np.sum(np.multiply(EPE, valid_mask)) / N
 
-    EPE_noc = np.multiply(np.sqrt(du2 + dv2), noc_mask)
+    EPE_noc = np.multiply(EPE, noc_mask)
     EPE_noc = np.sum(EPE_noc) / np.sum(noc_mask)
     occ_idx = (valid_mask.astype(np.uint8)-(noc_mask).astype(np.uint8))
-    EPE_occ = np.multiply(np.sqrt(du2 + dv2), occ_idx) 
+    EPE_occ = np.multiply(EPE, occ_idx) 
     EPE_occ = np.sum(EPE_occ) / max(np.sum(occ_idx), 1.0)
 
     # epe_all = np.sum(epe_map*mask)/np.sum(mask)
@@ -234,12 +255,13 @@ def evaluate_flow(flow, flow_gt, valid_mask=None, noc_mask=None):
 
     
     ### compute FL
+    EPE = np.multiply(EPE, valid_mask)
     bad_pixels = np.logical_and(
         EPE > 3,
         (EPE / np.sqrt(np.sum(np.square(flow_gt), axis=0)) + 1e-5) > 0.05)
     FL_avg = bad_pixels.sum() / valid_mask.sum()
 
-    return EPE_avg, EPE_noc, EPE_occ, FL_avg
+    return EPE_all, EPE_noc, EPE_occ, FL_avg
 
 def flow_warp(tenInput, tenFlow):
     tenHor = torch.linspace(-1.0 + (1.0 / tenFlow.shape[3]), 1.0 - (1.0 / tenFlow.shape[3]), tenFlow.shape[3]).view(1, 1, 1, -1).expand(-1, -1, tenFlow.shape[2], -1)
