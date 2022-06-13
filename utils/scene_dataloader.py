@@ -157,14 +157,14 @@ class myCycleImageFolder(data.Dataset):
         return len(self.left1)
     
 class myImageFolder(data.Dataset):
-    def __init__(self, left, right, flow, param, noc_flow=None, disp_gt=None, resize=True):
+    def __init__(self, left, right, flow, param, noc_flow=None, disp_gt=None, resize_or_crop='resize'):
         self.right = right
         self.left = left
         self.flow = flow
         self.noc_flow = noc_flow
         self.param = param
         self.disp_gt = disp_gt
-        self.resize = resize
+        self.resize_or_crop = resize_or_crop
         
     def __getitem__(self, index):
         left = self.left[index]
@@ -184,7 +184,7 @@ class myImageFolder(data.Dataset):
         # param.input_width = tw
         # param.input_height = th
  
-        process = get_transform(param, self.resize)
+        process = get_transform(param, self.resize_or_crop)
         left_image = process(left_image)
         right_image = process(right_image)
         
