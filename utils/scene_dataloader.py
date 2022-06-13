@@ -76,7 +76,7 @@ def get_transform(param, resize_or_crop):
         ])
     elif resize_or_crop == 'crop':
         return transforms.Compose([
-            transforms.RandomCrop([param.input_height, param.input_width]),
+            # transforms.RandomCrop([param.input_height, param.input_width]),
             transforms.ToTensor()
         ])
     
@@ -106,7 +106,18 @@ class myCycleImageFolder(data.Dataset):
             print('\read image error: \n', left1)
             exit()
 
-        
+        if self.resize_or_crop == 'crop':
+            w, h = left_image_1.size
+            th, tw = param.input_height, param.input_width
+    
+            x1 = random.randint(0, w - tw)
+            y1 = random.randint(0, h - th)
+
+            left_image_1 = left_image_1.crop((x1, y1, x1 + tw, y1 + th))
+            right_image_1 = right_image_1.crop((x1, y1, x1 + tw, y1 + th))
+            left_image_2 = left_image_2.crop((x1, y1, x1 + tw, y1 + th))
+            right_image_2 = right_image_2.crop((x1, y1, x1 + tw, y1 + th))
+
         #augmentation
         if self.training:
             
