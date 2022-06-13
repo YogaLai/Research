@@ -33,14 +33,14 @@ def torch_pwc_corr(refimg_fea, targetimg_fea):
     # cost = reweight_net(cost)
     # cost = cost.view(b, ph, pw, c, h, w)
     # cost = cost.permute([0,3,1,2,4,5]).contiguous() 
-    # # # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
-    # #     cost = cost.permute([0,2,3,1,4,5]).contiguous() 
-    # #     # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
-    # #     cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
-    # #     cost = matchnet(cost)
-    # #     # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
-    # #     cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
-    # #     cost = cost.permute([0,3,1,2,4,5]).contiguous() 
+    # # (B, 2C, U, V, H, W) -> (B, U, V, 2C, H, W)
+    #     cost = cost.permute([0,2,3,1,4,5]).contiguous() 
+    #     # (B, U, V, 2C, H, W) -> (BxUxV, 2C, H, W)
+    #     cost = cost.view(x.size()[0]*sizeU*sizeV,c*2, x.size()[2], x.size()[3])
+    #     cost = matchnet(cost)
+    #     # (BxUxV, 2C, H, W) -> (BxUxV, 1, H, W)
+    #     cost = cost.view(x.size()[0],sizeU,sizeV,1, x.size()[2],x.size()[3])
+    #     cost = cost.permute([0,3,1,2,4,5]).contiguous() 
 
     cost = cost.sum(1)
     b, ph, pw, h, w = cost.size()
@@ -201,7 +201,7 @@ class MatchingNetSmall(nn.Module):
 
 class MatchingNetSmallRes(nn.Module):
     # Matching net with 2D conv as mentioned in the paper
-    def __init__(self, attn_list, dcn=False):
+    def __init__(self, attn_list=None, dcn=False):
         super(MatchingNetSmallRes, self).__init__()
         self.match_list = nn.ModuleList([
                         BasicConv(32, 48, kernel_size=3, padding=1, dcn=dcn),
@@ -226,6 +226,22 @@ class MatchingNetSmallRes(nn.Module):
                 x = self.bam[i](x)
             if i == len(self.match_list)-2:
                 x = x + identity
+        return x
+
+class MatchingResNet(nn.Module):
+    # Matching net with 2D conv as mentioned in the paper
+    def __init__(self, dcn=False):
+        super(MatchingResNet, self).__init__()
+        self.conv1 = BasicConv(32, 32, kernel_size=3, padding=1, dcn=dcn)
+        self.conv2 = BasicConv(32, 32, kernel_size=3, padding=1, dcn=dcn)
+        self.conv3 = nn.Conv2d(32, 1 ,kernel_size=3, padding=1, bias=True)
+
+    def forward(self, x):
+        identity = x
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = x + identity
+        x = self.conv3(x)
         return x
 
 class MatchingNetDeep(nn.Module):
