@@ -68,26 +68,27 @@ def get_flow_data(file_path_test, path):
         
     return former_image_test, latter_image_test, flow_test
 
-def get_transform(param, resize):
-    if resize:
+def get_transform(param, resize_or_crop):
+    if resize_or_crop == 'resize':
         return transforms.Compose([
             transforms.Resize([param.input_height, param.input_width]),
             transforms.ToTensor()
         ])
-    else:
+    elif resize_or_crop == 'crop':
         return transforms.Compose([
+            transforms.RandomCrop([param.input_height, param.input_width]),
             transforms.ToTensor()
         ])
     
 class myCycleImageFolder(data.Dataset):
-    def __init__(self, left1, left2, right1, right2, training, param, resize=True):
+    def __init__(self, left1, left2, right1, right2, training, param, resize_or_crop='resize'):
         self.right1 = right1
         self.left1 = left1
         self.right2 = right2
         self.left2 = left2
         self.training = training
         self.param = param
-        self.resize = resize
+        self.resize_or_crop = resize_or_crop
         
     def __getitem__(self, index):
         left1 = self.left1[index]
@@ -145,7 +146,7 @@ class myCycleImageFolder(data.Dataset):
                 
         
         #transforms
-        process = get_transform(param, self.resize)
+        process = get_transform(param, self.resize_or_crop)
         left_image_1 = process(left_image_1)
         right_image_1 = process(right_image_1)
         left_image_2 = process(left_image_2)
