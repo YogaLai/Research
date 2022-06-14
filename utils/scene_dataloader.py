@@ -74,6 +74,11 @@ def get_transform(param, resize_or_crop):
             transforms.Resize([param.input_height, param.input_width]),
             transforms.ToTensor()
         ])
+    elif resize_or_crop == 'eval_resize':
+        return transforms.Compose([
+            transforms.Resize([384, 1280]),
+            transforms.ToTensor()
+        ])
     elif resize_or_crop == 'crop':
         return transforms.Compose([
             # transforms.RandomCrop([param.input_height, param.input_width]),
