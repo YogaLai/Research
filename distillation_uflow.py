@@ -161,7 +161,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             bw_mask = bw.clone().detach()
 
             student_occ_fw = occ_fw.clone().detach()
-            student_occ_bw = occ_fw.clone().detach()
+            student_occ_bw = occ_bw.clone().detach()
             fw, bw, occ_fw, occ_bw = get_mask(teacher_disp_est_scale, teacher_disp_est_scale_2, None)
             full_occ_fw = occ_fw.clone().detach()
             full_occ_bw = occ_bw.clone().detach()
