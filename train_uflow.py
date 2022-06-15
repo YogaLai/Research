@@ -18,7 +18,6 @@ from utils.evaluation_utils import *
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--split',                     type=str,   help='data split, kitti or eigen',         default='kitti')
-    parser.add_argument('--model_name',                type=str,   help='model name', default='pwc')
     parser.add_argument('--gt_path',                   type=str,   help='path to ground truth disparities',   required=True)
     parser.add_argument('--data_path',                 type=str,   help='path to the stereo data', required=True)
     parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
@@ -29,8 +28,8 @@ def get_args():
     parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=80)
     parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
     parser.add_argument('--lr_loss_weight',            type=float, help='left-right consistency weight', default=0.5)
-    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.01)
-    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=0.05)
+    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.05)
+    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=10)
     parser.add_argument('--census_loss_weight',        type=float, help='census loss weight', default=0.5)
     parser.add_argument('--alpha_image_loss',          type=float, help='weight between SSIM and L1 in the image loss', default=0.85)
     parser.add_argument('--disp_gradient_loss_weight', type=float, help='disparity smoothness weigth', default=0.1)
@@ -46,7 +45,7 @@ def get_args():
     args = parser.parse_args()
     return args
 
-os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
+# os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(71)
 torch.cuda.manual_seed(71)
@@ -60,15 +59,8 @@ torch.backends.cudnn.benchmark = True
 if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
-if args.model_name == 'pwc':
-    # net = PWCDCNet(share_sebock=False).cuda()
-    net = PWCDCNet().cuda()
-    # args.input_width = 768
-    args.input_width = 832
-elif args.model_name == 'dicl':
-    cfg_from_file('cfgs/dicl5_kitti.yml')
-    net = dicl_wrapper().cuda()
-    args.input_width = 768
+net = PWCDCNet().cuda()
+args.input_width = 832
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
@@ -402,9 +394,10 @@ def test_flow(dataloader, net, writer, epoch):
             mask = np.ceil(np.clip(np.abs(gt[0,0]), 0, 1))
             noc_mask = np.ceil(np.clip(np.abs(noc_gt[0,0]), 0, 1))
 
+            disp_h, disp_w = disp_est_scale[0].size(2), disp_est_scale[0].size(3)
             disp_ori_scale = nn.UpsamplingBilinear2d(size=(int(h), int(w)))(disp_est_scale[0][:1])
-            disp_ori_scale[0,0] = disp_ori_scale[0,0] * int(w) / args.input_width
-            disp_ori_scale[0,1] = disp_ori_scale[0,1] * int(h) / args.input_height
+            disp_ori_scale[0,0] = disp_ori_scale[0,0] * int(w) / disp_w
+            disp_ori_scale[0,1] = disp_ori_scale[0,1] * int(h) / disp_h
 
             epe_all, epe_noc, epe_occ, fl = evaluate_flow(disp_ori_scale[0].data.cpu().numpy(), gt[0].numpy(), mask.numpy(), noc_mask.numpy())
             total_error += epe_all
