@@ -4,8 +4,8 @@ import argparse
 # from models.PWC_net import *
 # from models.PWC_net_concat_cv import PWCDCNet
 # from models.PWC_net_small_attn import PWCDCNet
-# from models.UFlow_wo_residual import PWCDCNet
-from models.PWC_net_dc_cost_uflow import PWCDCNet
+from models.UFlow_wo_residual import PWCDCNet
+# from models.PWC_net_dc_cost_uflow import PWCDCNet
 # from models.PWC_net_small_attn_LD_biup import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -30,8 +30,8 @@ def get_args():
     parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=80)
     parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
     parser.add_argument('--lr_loss_weight',            type=float, help='left-right consistency weight', default=0.5)
-    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.01)
-    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=0.05)
+    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.05)
+    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=10)
     parser.add_argument('--census_loss_weight',        type=float, help='census loss weight', default=0.5)
     parser.add_argument('--selfsup_loss_weight',       type=float, help='self-supervised distillation weight', default=0.1)
     parser.add_argument('--alpha_image_loss',          type=float, help='weight between SSIM and L1 in the image loss', default=0.85)
@@ -64,14 +64,13 @@ if not os.path.isdir('savemodel/' + args.exp_name):
 
 net = PWCDCNet().cuda()
 teacher_net = PWCDCNet().cuda().eval()
-args.input_width = 768
-# args.input_width = 832
+args.input_width = 832
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
 CycleLoader = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
+    batch_size=args.batch_size, shuffle=True, drop_last=False)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
          batch_size = 1, shuffle = False, drop_last=False)
@@ -85,11 +84,7 @@ former_test, latter_test, flow = get_flow_data(flow_filenames_file, args.gt_path
 former_test, latter_test, noc_flow = get_flow_data(flow_noc_filename, args.gt_path)
 TestFlowLoader = torch.utils.data.DataLoader(
         myImageFolder(former_test, latter_test, flow, args, noc_flow=noc_flow),
-        batch_size = 1, shuffle = False, num_workers = 1, drop_last = False)
-
-if torch.cuda.device_count() >= 2:
-    net = nn.DataParallel(net)
-    teacher_net = nn.DataParallel(teacher_net)
+        batch_size = 1, shuffle = False, drop_last = False)
 
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
@@ -99,6 +94,10 @@ if args.loadmodel:
     # scheduler = checkpoint['scheduler']
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
+
+if torch.cuda.device_count() >= 2:
+    net = nn.DataParallel(net)
+    teacher_net = nn.DataParallel(teacher_net)
 
 def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
     slices = []
@@ -122,7 +121,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
     iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
     net.train()
-    selfsup_transformations = get_selfsup_transformations(args, crop_size=16)
+    selfsup_transformations = get_selfsup_transformations(args, crop_size=32)
     with tqdm(total=len(dataloader.dataset)) as pbar:
         for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(dataloader):
             optimizer.zero_grad()
@@ -151,22 +150,22 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
                                      disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
             border_mask = create_border_mask(former, 0.1)
-            # teacher_border_mask = create_border_mask(full_former, 0.1)
-            fw, bw, occ_fw, occ_bw = get_mask(disp_est_scale, disp_est_scale_2, border_mask)
+            teacher_border_mask = create_border_mask(full_former, 0.1)
+            fw, bw, occ_fw, occ_bw = get_mix_mask(disp_est_scale, disp_est_scale_2, border_mask, slices[1]+slices[2])
             fw += 1e-3
             bw += 1e-3
-            fw[slices[0] + slices[-1]] = fw[slices[0] + slices[-1]] * 0 + 1
-            bw[slices[0] + slices[-1]] = bw[slices[0] + slices[-1]] * 0 + 1
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
 
             student_occ_fw = occ_fw.clone().detach()
             student_occ_bw = occ_bw.clone().detach()
-            fw, bw, occ_fw, occ_bw = get_mask(teacher_disp_est_scale, teacher_disp_est_scale_2, None)
+            fw, bw, occ_fw, occ_bw = get_mix_mask(teacher_disp_est_scale, teacher_disp_est_scale_2, teacher_border_mask, slices[1]+slices[2])
+            fw += 1e-3
+            bw += 1e-3
             full_occ_fw = occ_fw.clone().detach()
             full_occ_bw = occ_bw.clone().detach()
 
-           # Reconstruction from right to left
+            # Reconstruction from right to left
             left_est = Resample2d()(latter, disp_est_scale)
             l1_left = torch.abs(left_est - former) * fw_mask 
             l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
