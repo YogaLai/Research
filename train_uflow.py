@@ -130,11 +130,8 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
                                      disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
             border_mask = create_border_mask(former, 0.1)
-            fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale, disp_est_scale_2, border_mask)
+            fw, bw, diff_fw, diff_bw = get_mix_mask(disp_est_scale, disp_est_scale_2, border_mask, slices[1]+slices[2])
             fw += 1e-3
-            bw += 1e-3
-            fw[slices[0] + slices[-1]] = fw[slices[0] + slices[-1]] * 0 + 1
-            bw[slices[0] + slices[-1]] = bw[slices[0] + slices[-1]] * 0 + 1
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
 
