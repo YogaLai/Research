@@ -74,7 +74,7 @@ TestImageLoader = torch.utils.data.DataLoader(
          batch_size = 1, shuffle = False, drop_last=False)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 5, 7, 9], gamma=0.5)
 
 flow_filenames_file = 'utils/filenames/kitti_flow_val_files_occ_200.txt'
 flow_noc_filename = flow_filenames_file.replace('occ_', '')
@@ -89,7 +89,7 @@ if args.loadmodel:
     net.load_state_dict(checkpoint['state_dict'])
     teacher_net.load_state_dict(checkpoint['state_dict'])
     epoch = checkpoint['epoch']
-    # scheduler = checkpoint['scheduler']
+    scheduler = checkpoint['scheduler']
     optimizer.load_state_dict(checkpoint['optimizer'])
     iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
@@ -182,13 +182,13 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             )
             pbar.update(left_image_1.size(0))
 
-    # scheduler.step()
+    scheduler.step()
 
     writer.add_scalar('epoch/distillation_loss', total_distillation_loss / len(CycleLoader.dataset), epoch)
     writer.add_scalar('epoch/distillation_loss_2', total_distillation_loss_2 / len(CycleLoader.dataset), epoch)
 
-    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
 
@@ -321,11 +321,11 @@ for epoch in range(start_epoch, args.num_epochs):
         best_stereo_metric = stereo_err
         str_err = "{:.4f}".format(stereo_err)
         # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-        state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+        state = {'epoch': epoch, 'state_dict': net.state_dict()}
         torch.save(state, "savemodel/" + args.exp_name + "/best_" + str_err + "_epoch" + str(epoch))
     if flow_err < best_flow_metric:
         best_flow_metric = flow_err
         str_err = "{:.4f}".format(flow_err)
         # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-        state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+        state = {'epoch': epoch, 'state_dict': net.state_dict()}
         torch.save(state, "savemodel/" + args.exp_name + "/flow_best_" + str_err + "_epoch" + str(epoch))
