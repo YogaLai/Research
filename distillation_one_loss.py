@@ -98,7 +98,7 @@ if torch.cuda.device_count() >= 2:
     teacher_net = nn.DataParallel(teacher_net)
 
 def gaussian_noise(x, mean=0, sigma=0.1):
-    noise = torch.normal(mean, sigma, x.shape)
+    noise = torch.normal(mean, sigma, x.shape).to(x.device)
     gaussian_out = x + noise
     gaussian_out = torch.clamp(gaussian_out, 0, 1)
     return gaussian_out
@@ -128,29 +128,23 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             model_input_2 = torch.cat((full_latter, full_former), 1)
 
             noise_latter = gaussian_noise((latter))
-            print(torch.all(latter == noise_latter))
-            crop_model_input = torch.cat((former, latter), 1)
-            crop_model_input_2 = torch.cat((latter, former), 1)
+            noise_former = gaussian_noise((latter))
+            crop_model_input = torch.cat((former, noise_latter), 1)
+            crop_model_input_2 = torch.cat((latter, noise_former), 1)
 
             with torch.no_grad():
                 teacher_disp_est_scale, teacher_flows = teacher_net(model_input)
                 teacher_disp_est_scale_2, teacher_flows_2 = teacher_net(model_input_2)
 
             disp_est_scale, flows = net(crop_model_input)
-            disp_est = torch.cat((disp_est_scale[:, 0, :, :].unsqueeze(1) / disp_est_scale.shape[3],
-                                   disp_est_scale[:, 1, :, :].unsqueeze(1) / disp_est_scale.shape[2]), 1)
             disp_est_scale_2, flows_2 = net(crop_model_input_2)
-            disp_est_2 = torch.cat((disp_est_scale_2[:, 0, :, :].unsqueeze(1) / disp_est_scale_2.shape[3],
-                                     disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
             teacher_border_mask = create_border_mask(full_former, 0.1)
             fw, bw, occ_fw, occ_bw = get_mix_mask(teacher_disp_est_scale, teacher_disp_est_scale_2, teacher_border_mask, slices[1]+slices[2])
-            fw += 1e-3
-            bw += 1e-3
+            # fw += 1e-3
+            # bw += 1e-3
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
-            # full_occ_fw = occ_fw.clone().detach()
-            # full_occ_bw = occ_bw.clone().detach()
 
             # Distillation
             crop_teacher_disp_est_scale = selfsup_transformations(teacher_disp_est_scale)
