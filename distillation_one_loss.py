@@ -128,7 +128,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             model_input_2 = torch.cat((full_latter, full_former), 1)
 
             noise_latter = gaussian_noise((latter))
-            noise_former = gaussian_noise((latter))
+            noise_former = gaussian_noise((former))
             crop_model_input = torch.cat((former, noise_latter), 1)
             crop_model_input_2 = torch.cat((latter, noise_former), 1)
 
