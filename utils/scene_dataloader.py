@@ -79,7 +79,7 @@ def get_transform(param, resize_or_crop):
             transforms.Resize([384, 1280]),
             transforms.ToTensor()
         ])
-    elif resize_or_crop == 'crop':
+    elif resize_or_crop == 'crop' or resize_or_crop == 'dilated_warp':
         return transforms.Compose([
             # transforms.RandomCrop([param.input_height, param.input_width]),
             transforms.ToTensor()
@@ -111,12 +111,19 @@ class myCycleImageFolder(data.Dataset):
             print('\read image error: \n', left1)
             exit()
 
-        if self.resize_or_crop == 'crop':
+        if self.resize_or_crop == 'dilated_warp':
+            ori_left_1 = left_image_1
+            ori_right_1 = right_image_1
+            ori_left_2 = left_image_2
+            ori_right_2 = right_image_2
+
+        if self.resize_or_crop == 'crop' or self.resize_or_crop == 'dilated_warp':
             w, h = left_image_1.size
             th, tw = param.input_height, param.input_width
     
             x1 = random.randint(0, w - tw)
             y1 = random.randint(0, h - th)
+            start_coordinate = torch.tensor([x1, y1]).view(-1,1,1)
 
             left_image_1 = left_image_1.crop((x1, y1, x1 + tw, y1 + th))
             right_image_1 = right_image_1.crop((x1, y1, x1 + tw, y1 + th))
@@ -168,7 +175,21 @@ class myCycleImageFolder(data.Dataset):
         left_image_2 = process(left_image_2)
         right_image_2 = process(right_image_2)
         
+        if self.resize_or_crop == 'dilated_warp':
+            ori_left_1 = process(ori_left_1)
+            ori_right_1 = process(ori_right_1)
+            ori_left_2 = process(ori_left_2)
+            ori_right_2 = process(ori_right_2)
+            data_dict = {}
+            data_dict["start_coordinate"] = start_coordinate
+            data_dict["ori_left_1"] = ori_left_1
+            data_dict["ori_right_1"] = ori_right_1
+            data_dict["ori_left_2"] = ori_left_2
+            data_dict["ori_right_2"] = ori_right_2
+            return left_image_1, left_image_2, right_image_1, right_image_2, data_dict 
+
         return left_image_1, left_image_2, right_image_1, right_image_2
+
     def __len__(self):
         return len(self.left1)
     

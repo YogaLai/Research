@@ -42,10 +42,11 @@ def get_args():
     parser.add_argument('--min_depth',                 type=float, help='minimum depth for evaluation', default=1e-3)
     parser.add_argument('--max_depth',                 type=float, help='maximum depth for evaluation',  default=80)
     parser.add_argument('--use_census_loss',           help='enable census loss calculation', action="store_true")
+    parser.add_argument('--use_boundary_dilated_warp', help='enable boundary_dilated_warping', action="store_true")
     args = parser.parse_args()
     return args
 
-# os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(71)
 torch.cuda.manual_seed(71)
@@ -65,7 +66,7 @@ args.input_width = 832
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
 CycleLoader = torch.utils.data.DataLoader(
-    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
+    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args, resize_or_crop='dilated_warp'),
     batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
@@ -113,11 +114,14 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
 
     net.train()
     with tqdm(total=len(dataloader.dataset)) as pbar:
-        for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(dataloader):
+        for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2, data_dict) in enumerate(dataloader):
             optimizer.zero_grad()
 
             former = torch.cat((left_image_2, left_image_1, right_image_1, left_image_1), 0).cuda()
             latter = torch.cat((right_image_2, left_image_2, right_image_2, right_image_1), 0).cuda()
+            ori_former = torch.cat((data_dict["ori_left_2"], data_dict["ori_left_1"], data_dict["ori_right_1"], data_dict["ori_left_1"]), 0).cuda()
+            ori_latter = torch.cat((data_dict["ori_right_2"], data_dict["ori_left_2"], data_dict["ori_right_2"], data_dict["ori_right_1"]), 0).cuda()
+            start_coordinate = data_dict["start_coordinate"].cuda()
 
             model_input = torch.cat((former, latter), 1)
             model_input_2 = torch.cat((latter, former), 1)
@@ -129,14 +133,21 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             disp_est_2 = torch.cat((disp_est_scale_2[:, 0, :, :].unsqueeze(1) / disp_est_scale_2.shape[3],
                                      disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
-            border_mask = create_border_mask(former, 0.1)
-            fw, bw, diff_fw, diff_bw = get_mix_mask(disp_est_scale, disp_est_scale_2, border_mask, slices[1]+slices[2])
+            if args.use_boundary_dilated_warp:
+                fw, bw = get_dilated_warp_mask(disp_est_scale, disp_est_scale_2)
+            else:
+                border_mask = create_border_mask(former, 0.1)
+                fw, bw, diff_fw, diff_bw = get_mix_mask(disp_est_scale, disp_est_scale_2, border_mask, slices[1]+slices[2])
             fw += 1e-3
+            bw += 1e-3
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
 
-           # Reconstruction from right to left
-            left_est = Resample2d()(latter, disp_est_scale)
+            # Reconstruction from right to left
+            if args.use_boundary_dilated_warp:
+                left_est = boundary_dilated_warp.warp_im(ori_latter, disp_est_scale, start_coordinate)
+            else:
+                left_est = Resample2d()(latter, disp_est_scale)
             l1_left = torch.abs(left_est - former) * fw_mask 
             l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
             ssim_left = SSIM(left_est * fw_mask, former * fw_mask) 
@@ -144,7 +155,10 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             image_loss = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left
 
             # Reconstruction from left to right
-            right_est = Resample2d()(former, disp_est_scale_2) 
+            if args.use_boundary_dilated_warp:
+                right_est = boundary_dilated_warp.warp_im(ori_former, disp_est_scale_2, start_coordinate)
+            else:
+                right_est = Resample2d()(former, disp_est_scale_2) 
             l1_right = torch.abs(right_est - latter) * bw_mask 
             l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask) 
             ssim_right = SSIM(right_est * bw_mask, latter * bw_mask) 
@@ -270,6 +284,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
                 writer.add_images('left_rgb', left_image_1, iter)
                 writer.add_images('right_rgb', right_image_1, iter)
                 writer.add_images('rec_left', left_est, iter)
+                writer.add_images('rec_right', right_est, iter)
 
             if (iter + 1) % 600 == 0:
                 # state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
