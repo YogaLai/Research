@@ -42,6 +42,7 @@ def get_args():
     parser.add_argument('--min_depth',                 type=float, help='minimum depth for evaluation', default=1e-3)
     parser.add_argument('--max_depth',                 type=float, help='maximum depth for evaluation',  default=80)
     parser.add_argument('--use_census_loss',           help='enable census loss calculation', action="store_true")
+    parser.add_argument('--use_fb_consistency_loss',   help='enable fb consistency loss and disable lr consistency loss', action="store_true")
     args = parser.parse_args()
     return args
 
@@ -60,13 +61,14 @@ if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
 net = PWCDCNet().cuda()
-args.input_width = 832
+args.input_width = 896
+args.input_height = 320
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
 CycleLoader = torch.utils.data.DataLoader(
     myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
-    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
          batch_size = 1, shuffle = False, drop_last=False)
@@ -123,18 +125,17 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             model_input_2 = torch.cat((latter, former), 1)
 
             disp_est_scale, flows = net(model_input)
-            disp_est = torch.cat((disp_est_scale[:, 0, :, :].unsqueeze(1) / disp_est_scale.shape[3],
-                                   disp_est_scale[:, 1, :, :].unsqueeze(1) / disp_est_scale.shape[2]), 1)
             disp_est_scale_2, flows_2 = net(model_input_2)
-            disp_est_2 = torch.cat((disp_est_scale_2[:, 0, :, :].unsqueeze(1) / disp_est_scale_2.shape[3],
-                                     disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
+            if not args.use_fb_consistency_loss:
+                disp_est = torch.cat((disp_est_scale[:, 0, :, :].unsqueeze(1) / disp_est_scale.shape[3],
+                                        disp_est_scale[:, 1, :, :].unsqueeze(1) / disp_est_scale.shape[2]), 1)
+                disp_est_2 = torch.cat((disp_est_scale_2[:, 0, :, :].unsqueeze(1) / disp_est_scale_2.shape[3],
+                                        disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
             border_mask = create_border_mask(former, 0.1)
-            fw, bw, diff_fw, diff_bw = get_mask(disp_est_scale, disp_est_scale_2, border_mask)
+            fw, bw, diff_fw, diff_bw = get_mix_mask(disp_est_scale, disp_est_scale_2, border_mask, slices[1]+slices[2])
             fw += 1e-3
             bw += 1e-3
-            fw[slices[0] + slices[-1]] = fw[slices[0] + slices[-1]] * 0 + 1
-            bw[slices[0] + slices[-1]] = bw[slices[0] + slices[-1]] * 0 + 1
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
 
@@ -163,13 +164,15 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             disp_gradient_loss = cal_grad2_error(disp_est_scale / 20, former, 1.0)
             disp_gradient_loss_2 = cal_grad2_error(disp_est_scale_2 / 20, latter, 1.0)
 
-
-           # LR consistency
-            right_to_left_disp = -Resample2d()(disp_est_2, disp_est_scale) 
-            left_to_right_disp = -Resample2d()(disp_est, disp_est_scale_2)
-            lr_left_loss = torch.mean(torch.abs(right_to_left_disp[slices[0] + slices[-1]] - disp_est[slices[0] + slices[-1]])) 
-            lr_right_loss = torch.mean(torch.abs(left_to_right_disp[slices[0] + slices[-1]] - disp_est_2[slices[0] + slices[-1]]))
-            lr_loss = lr_left_loss + lr_right_loss
+            # LR consistency
+            if args.use_fb_consistency_loss:
+                lr_loss = photo_loss_abs_robust(diff_fw, fw_mask) + photo_loss_abs_robust(diff_bw, bw_mask)
+            else:
+                right_to_left_disp = -Resample2d()(disp_est_2, disp_est_scale) 
+                left_to_right_disp = -Resample2d()(disp_est, disp_est_scale_2)
+                lr_left_loss = torch.mean(torch.abs(right_to_left_disp[slices[0] + slices[-1]] - disp_est[slices[0] + slices[-1]])) 
+                lr_right_loss = torch.mean(torch.abs(left_to_right_disp[slices[0] + slices[-1]] - disp_est_2[slices[0] + slices[-1]]))
+                lr_loss = lr_left_loss + lr_right_loss
 
             # Pyramid distillation
             flow_fw_label = disp_est_scale.clone().detach()
@@ -181,8 +184,8 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
                 occ_scale_fw = F.interpolate(fw_mask, [scale_fw.size(2), scale_fw.size(3)], mode='nearest')
                 flow_bw_label_sacle = upsample_flow(flow_bw_label, target_flow=scale_bw)
                 occ_scale_bw = F.interpolate(bw_mask, [scale_bw.size(2), scale_bw.size(3)], mode='nearest')
-                msd_loss_scale_fw = photo_loss_abs_robust(x=scale_fw, y=flow_fw_label_sacle, occ_mask=occ_scale_fw)
-                msd_loss_scale_bw = photo_loss_abs_robust(x=scale_bw, y=flow_bw_label_sacle, occ_mask=occ_scale_bw) 
+                msd_loss_scale_fw = photo_loss_abs_robust(scale_fw - flow_fw_label_sacle, occ_mask=occ_scale_fw)
+                msd_loss_scale_bw = photo_loss_abs_robust(scale_bw - flow_bw_label_sacle, occ_mask=occ_scale_bw) 
                 msd_loss.append(msd_loss_scale_fw)
                 msd_loss.append(msd_loss_scale_bw)
             msd_loss = sum(msd_loss)
