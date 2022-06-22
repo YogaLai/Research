@@ -169,7 +169,7 @@ def get_mix_mask(forward, backward, border_mask, flow_slices):
     fw = mask_fw * (1 - fb_occ_fw)
     bw = mask_bw * (1 - fb_occ_bw)
 
-    return fw, bw, fb_occ_fw, fb_occ_bw
+    return fw, bw, flow_diff_fw, flow_diff_bw
 
 def get_dilated_warp_mask(forward, backward):
     def get_obj_occ_check(valid_mask, out_occ):
