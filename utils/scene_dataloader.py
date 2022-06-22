@@ -86,7 +86,7 @@ def get_transform(param, resize_or_crop):
         ])
     
 class myCycleImageFolder(data.Dataset):
-    def __init__(self, left1, left2, right1, right2, training, param, resize_or_crop='resize'):
+    def __init__(self, left1, left2, right1, right2, training, param, resize_or_crop='resize', crop_rho=32):
         self.right1 = right1
         self.left1 = left1
         self.right2 = right2
@@ -94,6 +94,7 @@ class myCycleImageFolder(data.Dataset):
         self.training = training
         self.param = param
         self.resize_or_crop = resize_or_crop
+        self.crop_rho = crop_rho
         
     def __getitem__(self, index):
         left1 = self.left1[index]
@@ -111,28 +112,8 @@ class myCycleImageFolder(data.Dataset):
             print('\read image error: \n', left1)
             exit()
 
-        if self.resize_or_crop == 'dilated_warp':
-            ori_left_1 = left_image_1
-            ori_right_1 = right_image_1
-            ori_left_2 = left_image_2
-            ori_right_2 = right_image_2
-
-        if self.resize_or_crop == 'crop' or self.resize_or_crop == 'dilated_warp':
-            w, h = left_image_1.size
-            th, tw = param.input_height, param.input_width
-    
-            x1 = random.randint(0, w - tw)
-            y1 = random.randint(0, h - th)
-            start_coordinate = torch.tensor([x1, y1]).view(-1,1,1)
-
-            left_image_1 = left_image_1.crop((x1, y1, x1 + tw, y1 + th))
-            right_image_1 = right_image_1.crop((x1, y1, x1 + tw, y1 + th))
-            left_image_2 = left_image_2.crop((x1, y1, x1 + tw, y1 + th))
-            right_image_2 = right_image_2.crop((x1, y1, x1 + tw, y1 + th))
-
         #augmentation
         if self.training:
-            
             #randomly flip
             if random.uniform(0, 1) > 0.5:
                 left_image_1 = left_image_1.transpose(Image.FLIP_LEFT_RIGHT)
@@ -167,7 +148,30 @@ class myCycleImageFolder(data.Dataset):
                 left_image_2 = Image.fromarray(np.clip((np.array(left_image_2) * color_image), 0, 255).astype('uint8'), 'RGB')
                 right_image_2 = Image.fromarray(np.clip((np.array(right_image_2) * color_image), 0, 255).astype('uint8'), 'RGB')
                 
-        
+        if self.resize_or_crop == 'dilated_warp':
+            transform = transforms.Resize([384, 1280])
+            ori_left_1 = transform(left_image_1)
+            ori_right_1 = transform(right_image_1)
+            ori_left_2 = transform(left_image_2)
+            ori_right_2 = transform(right_image_2)
+
+        if self.resize_or_crop == 'crop' or self.resize_or_crop == 'dilated_warp':
+            w, h = ori_left_1.size
+            th, tw = param.input_height, param.input_width
+
+            if self.resize_or_crop == 'dilated_warp':
+                x1 = random.randint(self.crop_rho, w - tw - self.crop_rho)
+                y1 = random.randint(self.crop_rho, h - th - self.crop_rho)
+                start_coordinate = torch.tensor([x1, y1]).view(-1,1,1)
+            else:
+                x1 = random.randint(0, w - tw)
+                y1 = random.randint(0, h - th)
+
+            left_image_1 = ori_left_1.crop((x1, y1, x1 + tw, y1 + th))
+            right_image_1 = ori_right_1.crop((x1, y1, x1 + tw, y1 + th))
+            left_image_2 = ori_left_2.crop((x1, y1, x1 + tw, y1 + th))
+            right_image_2 = ori_right_2.crop((x1, y1, x1 + tw, y1 + th))
+
         #transforms
         process = get_transform(param, self.resize_or_crop)
         left_image_1 = process(left_image_1)
