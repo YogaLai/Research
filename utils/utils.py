@@ -619,9 +619,8 @@ def upsample_flow(inputs, target_size=None, target_flow=None, mode="bilinear"):
     res[:, 1, :, :] *= (h / h_)
     return res
 
-def photo_loss_abs_robust(x, y, occ_mask, photo_loss_delta=0.4):
-    photo_diff = x - y
-    loss_diff = (torch.abs(photo_diff) + 0.01).pow(photo_loss_delta)
+def photo_loss_abs_robust(diff, occ_mask, photo_loss_delta=0.4):
+    loss_diff = (torch.abs(diff) + 0.01).pow(photo_loss_delta)
     photo_loss = torch.sum(loss_diff * occ_mask) / (torch.sum(occ_mask) + 1e-6)
     return photo_loss
 

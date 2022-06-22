@@ -47,7 +47,7 @@ def load_gt_disp_kitti(path, occ_type='occ'):
         raise BaseException('The occ type must be occ/noc/all')
     if occ_type == 'occ' or occ_type == 'noc':
         for i in range(200):
-            disp = cv2.imread(path + "/disp_" + occ_type + "_0/" + str(i).zfill(6) + "_10.png", -1)
+            disp = cv2.imread(path + "training/disp_" + occ_type + "_0/" + str(i).zfill(6) + "_10.png", -1)
             disp = disp.astype(np.float32) / 256
             gt_disparities.append(disp)
     # else:
