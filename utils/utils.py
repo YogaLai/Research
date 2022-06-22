@@ -212,9 +212,9 @@ class boundary_dilated_warp():
             grid = torch.cat((xx, yy, ones), 1).float()
             if torch.cuda.is_available():
                 grid = grid.cuda()
-            # print("grid",grid.shape)
-            # print("start", start)
-            grid[:, :2, :, :] = grid[:, :2, :, :] + start  # 加上patch在原图内的偏移量
+            # print("grid", grid.shape)
+            # print("start", start.repeat(batch_size//start.size(0), 1, 1, 1).shape)
+            grid[:, :2, :, :] = grid[:, :2, :, :] + start.repeat(batch_size // start.size(0), 1, 1, 1)  # 加上patch在原图内的偏移量
 
             return grid
 
