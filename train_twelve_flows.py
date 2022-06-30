@@ -47,7 +47,7 @@ def get_args():
     args = parser.parse_args()
     return args
 
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(71)
 torch.cuda.manual_seed(71)
@@ -62,14 +62,14 @@ if not os.path.isdir('savemodel/' + args.exp_name):
     os.makedirs('savemodel/' + args.exp_name)
 
 net = PWCDCNet().cuda()
-args.input_width = 832
-args.input_height = 256
+args.input_width = 896
+args.input_height = 320
 
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
 CycleLoader = torch.utils.data.DataLoader(
-    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args, resize_or_crop='resize'),
-    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4)
+    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args, resize_or_crop='crop'),
+    batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
 TestImageLoader = torch.utils.data.DataLoader(
          myImageFolder(left_image_test, right_image_test, None, args),
          batch_size = 1, shuffle = False, drop_last=False)
@@ -82,7 +82,7 @@ former_test, latter_test, flow = get_flow_data(flow_filenames_file, args.gt_path
 former_test, latter_test, noc_flow = get_flow_data(flow_noc_filename, args.gt_path)
 TestFlowLoader = torch.utils.data.DataLoader(
         myImageFolder(former_test, latter_test, flow, args, noc_flow=noc_flow),
-        batch_size = 1, shuffle = False, num_workers = 1, drop_last = False)
+        batch_size = 1, shuffle = False, drop_last = False)
 
 if args.loadmodel:
     checkpoint = torch.load(args.loadmodel)
@@ -122,7 +122,11 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             model_input_2 = torch.cat((latter, former), 1)
 
             disp_est_scale, flows = net(model_input)
-            disp_est_scale_2, flows_2 = net(model_input_2)
+            disp_est_scale_2, flows_2 = net(model_input_2) 
+            disp_est = torch.cat((disp_est_scale[:, 0, :, :].unsqueeze(1) / disp_est_scale.shape[3],
+                                        disp_est_scale[:, 1, :, :].unsqueeze(1) / disp_est_scale.shape[2]), 1)
+            disp_est_2 = torch.cat((disp_est_scale_2[:, 0, :, :].unsqueeze(1) / disp_est_scale_2.shape[3],
+                                        disp_est_scale_2[:, 1, :, :].unsqueeze(1) / disp_est_scale_2.shape[2]), 1)
 
             if args.use_boundary_dilated_warp:
                 fw, bw = get_dilated_warp_mask(disp_est_scale, disp_est_scale_2)
@@ -143,22 +147,22 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
                 left_est = boundary_dilated_warp.warp_im(ori_latter, disp_est_scale, start_coordinate)
             else:
                 left_est = Resample2d()(latter, disp_est_scale)
-            # l1_left = torch.abs(left_est - former) * fw_mask 
-            # l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
-            # ssim_left = SSIM(left_est * fw_mask, former * fw_mask) 
-            # ssim_loss_left = torch.mean(ssim_left) / torch.mean(fw_mask) 
-            # image_loss = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left
+            l1_left = torch.abs(left_est - former) * fw_mask 
+            l1_reconstruction_loss_left = torch.mean(l1_left) / torch.mean(fw_mask) 
+            ssim_left = SSIM(left_est * fw_mask, former * fw_mask) 
+            ssim_loss_left = torch.mean(ssim_left) / torch.mean(fw_mask) 
+            image_loss = args.alpha_image_loss * ssim_loss_left + (1 - args.alpha_image_loss) * l1_reconstruction_loss_left
 
             # Reconstruction from left to right
             if args.use_boundary_dilated_warp:
                 right_est = boundary_dilated_warp.warp_im(ori_former, disp_est_scale_2, start_coordinate)
             else:
                 right_est = Resample2d()(former, disp_est_scale_2) 
-            # l1_right = torch.abs(right_est - latter) * bw_mask 
-            # l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask) 
-            # ssim_right = SSIM(right_est * bw_mask, latter * bw_mask) 
-            # ssim_loss_right = torch.mean(ssim_right) / torch.mean(bw_mask) 
-            # image_loss_2 =  args.alpha_image_loss * ssim_loss_right + (1 - args.alpha_image_loss) * l1_reconstruction_loss_right
+            l1_right = torch.abs(right_est - latter) * bw_mask 
+            l1_reconstruction_loss_right = torch.mean(l1_right) / torch.mean(bw_mask) 
+            ssim_right = SSIM(right_est * bw_mask, latter * bw_mask) 
+            ssim_loss_right = torch.mean(ssim_right) / torch.mean(bw_mask) 
+            image_loss_2 =  args.alpha_image_loss * ssim_loss_right + (1 - args.alpha_image_loss) * l1_reconstruction_loss_right
 
             # Census
             if args.use_census_loss:
@@ -168,6 +172,18 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             # Smooth loss
             disp_gradient_loss = cal_grad2_error(disp_est_scale / 20, former, 1.0)
             disp_gradient_loss_2 = cal_grad2_error(disp_est_scale_2 / 20, latter, 1.0)
+
+            # LR consistency
+            if args.use_fb_consistency_loss:
+                lr_loss = photo_loss_abs_robust(diff_fw, fw_mask) + photo_loss_abs_robust(diff_bw, bw_mask)
+            else:
+                right_to_left_disp = -Resample2d()(disp_est_2, disp_est_scale) 
+                left_to_right_disp = -Resample2d()(disp_est, disp_est_scale_2)
+                lr_left_loss = torch.abs(right_to_left_disp[slices[0] + slices[-1]] - disp_est[slices[0] + slices[-1]]) * fw_mask[slices[0] + slices[-1]]
+                lr_left_loss = torch.mean(lr_left_loss) / (torch.mean(fw_mask[slices[0] + slices[-1]]) + 1e-6)
+                lr_right_loss = torch.abs(left_to_right_disp[slices[0] + slices[-1]] - disp_est_2[slices[0] + slices[-1]]) * bw_mask[slices[0] + slices[-1]]
+                lr_right_loss = torch.mean(lr_right_loss) / (torch.mean(bw_mask[slices[0] + slices[-1]]) + 1e-6)
+                lr_loss = lr_left_loss + lr_right_loss
 
             # Pyramid distillation
             flow_fw_label = disp_est_scale.clone().detach()
@@ -188,9 +204,8 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             if args.use_census_loss:
                 # loss = args.census_loss_weight * (image_loss + image_loss_2) 
                 loss = args.census_loss_weight * (image_loss + image_loss_2) + args.smooth_loss_weight * (disp_gradient_loss + disp_gradient_loss_2) + args.msd_loss_weight * msd_loss
-                
-            # else:
-            #     loss =  2 * (image_loss + image_loss_2) + args.smooth_loss_weight * (disp_gradient_loss + disp_gradient_loss_2) + args.lr_loss_weight * lr_loss + args.msd_loss_weight * msd_loss
+            else:
+                loss =  2 * (image_loss + image_loss_2) + args.smooth_loss_weight * (disp_gradient_loss + disp_gradient_loss_2) + args.lr_loss_weight * lr_loss + args.msd_loss_weight * msd_loss
                 
             """
             ##########################################################################################
@@ -280,7 +295,7 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             )
             pbar.update(left_image_1.size(0))
 
-    # scheduler.step()
+    scheduler.step()
 
     writer.add_scalar('epoch/rec_loss', total_image_loss / len(CycleLoader.dataset), epoch)
     writer.add_scalar('epoch/rec_loss_2', total_image_loss_2 / len(CycleLoader.dataset), epoch)
@@ -291,8 +306,8 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
         writer.add_scalar('epoch/warp2loss', total_warp2loss / len(CycleLoader.dataset), epoch)
         writer.add_scalar('epoch/warp2loss_2', total_warp2loss_2 / len(CycleLoader.dataset), epoch)
 
-    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
 
