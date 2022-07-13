@@ -80,9 +80,9 @@ def cal_grad2_error(flo, image, beta, edge_weight=10.0):
 
 def warp_2(est, img, occ_mask, args):
     l1_warp2 = torch.abs(est - img) * occ_mask
-    l1_reconstruction_loss_warp2 = torch.mean(l1_warp2) / torch.mean(occ_mask)
+    l1_reconstruction_loss_warp2 = torch.mean(l1_warp2) / (torch.mean(occ_mask) + 1e-6)
     ssim_warp2 = SSIM(est * occ_mask, img * occ_mask)
-    ssim_loss_warp2 = torch.mean(ssim_warp2) / torch.mean(occ_mask)
+    ssim_loss_warp2 = torch.mean(ssim_warp2) / (torch.mean(occ_mask) + 1e-6)
     image_loss_warp2  = args.alpha_image_loss * ssim_loss_warp2 + (1 - args.alpha_image_loss) * l1_reconstruction_loss_warp2
     return image_loss_warp2
 
