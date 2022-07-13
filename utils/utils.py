@@ -80,9 +80,9 @@ def cal_grad2_error(flo, image, beta, edge_weight=10.0):
 
 def warp_2(est, img, occ_mask, args):
     l1_warp2 = torch.abs(est - img) * occ_mask
-    l1_reconstruction_loss_warp2 = torch.mean(l1_warp2) / torch.mean(occ_mask)
+    l1_reconstruction_loss_warp2 = torch.mean(l1_warp2) / (torch.mean(occ_mask) + 1e-6)
     ssim_warp2 = SSIM(est * occ_mask, img * occ_mask)
-    ssim_loss_warp2 = torch.mean(ssim_warp2) / torch.mean(occ_mask)
+    ssim_loss_warp2 = torch.mean(ssim_warp2) / (torch.mean(occ_mask) + 1e-6)
     image_loss_warp2  = args.alpha_image_loss * ssim_loss_warp2 + (1 - args.alpha_image_loss) * l1_reconstruction_loss_warp2
     return image_loss_warp2
 
@@ -169,7 +169,7 @@ def get_mix_mask(forward, backward, border_mask, flow_slices):
     fw = mask_fw * (1 - fb_occ_fw)
     bw = mask_bw * (1 - fb_occ_bw)
 
-    return fw, bw, fb_occ_fw, fb_occ_bw
+    return fw, bw, flow_diff_fw, flow_diff_bw
 
 def get_dilated_warp_mask(forward, backward):
     def get_obj_occ_check(valid_mask, out_occ):
@@ -569,7 +569,7 @@ def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, a
 
     def _ternary_transform_torch(image):
         R, G, B = torch.split(image, 1, 1)
-        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B) * 255  # * 255  # convert to gray
+        intensities_torch = (0.2989 * R + 0.5870 * G + 0.1140 * B) # * 255  # convert to gray
         # intensities = tf.image.rgb_to_grayscale(image) * 255
         out_channels = patch_size * patch_size
         w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))  # h,w,1,out_c
@@ -604,7 +604,7 @@ def census_loss(img1, img1_warp, mask, q=0.45, charbonnier_or_abs_robust=True, a
                                                 [max_disp, max_disp]])
     census_loss = photo_loss_function(diff=dist, mask=mask * transform_mask, q=q,
                                             charbonnier_or_abs_robust=charbonnier_or_abs_robust, averge=averge)
-    return census_loss, dist
+    return census_loss
 
 def upsample_flow(inputs, target_size=None, target_flow=None, mode="bilinear"):
     if target_size is not None:
