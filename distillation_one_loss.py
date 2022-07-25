@@ -5,6 +5,7 @@ import argparse
 # from models.PWC_net_concat_cv import PWCDCNet
 # from models.PWC_net_small_attn import PWCDCNet
 from models.UFlow_wo_residual import PWCDCNet
+# from models.PWC_net_dc_cost_uflow import PWCDCNet
 # from models.PWC_net_small_attn_LD_biup import PWCDCNet
 from utils.scene_dataloader import *
 from utils.utils import *
@@ -12,8 +13,9 @@ from networks.resample2d_package.resample2d import Resample2d
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import os
-from utils.evaluation_utils import *
 from torchvision.transforms.functional import crop
+from utils.evaluation_utils import *
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -29,8 +31,8 @@ def get_args():
     parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=80)
     parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
     parser.add_argument('--lr_loss_weight',            type=float, help='left-right consistency weight', default=0.5)
-    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.01)
-    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=0.05)
+    parser.add_argument('--msd_loss_weight',           type=float, help='multi scale distillation weight', default=0.05)
+    parser.add_argument('--smooth_loss_weight',        type=float, help='smooth loss weight', default=10)
     parser.add_argument('--census_loss_weight',        type=float, help='census loss weight', default=0.5)
     parser.add_argument('--selfsup_loss_weight',       type=float, help='self-supervised distillation weight', default=0.1)
     parser.add_argument('--alpha_image_loss',          type=float, help='weight between SSIM and L1 in the image loss', default=0.85)
@@ -43,7 +45,7 @@ def get_args():
     parser.add_argument('--loadmodel',                 type=str,   help='the path of model weight')
     parser.add_argument('--min_depth',                 type=float, help='minimum depth for evaluation', default=1e-3)
     parser.add_argument('--max_depth',                 type=float, help='maximum depth for evaluation',  default=80)
-    parser.add_argument('--random_crop',           help='enable random crop', action="store_true")
+    parser.add_argument('--use_census_loss',           help='enable census loss calculation', action="store_true")
     args = parser.parse_args()
     return args
 
@@ -69,13 +71,13 @@ args.input_height = 320
 left_image_1, left_image_2, right_image_1, right_image_2 = get_kitti_cycle_data(args.filenames_file, args.data_path)
 left_image_test, right_image_test = get_data(args.test_filenames_file, args.gt_path)
 CycleLoader = torch.utils.data.DataLoader(
-    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args),
+    myCycleImageFolder(left_image_1, left_image_2, right_image_1, right_image_2, True, args, resize_or_crop='superpixel'),
     batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
 TestImageLoader = torch.utils.data.DataLoader(
-         myImageFolder(left_image_test, right_image_test, None, args),
-         batch_size = 1, shuffle = False, drop_last=False)
+    myImageFolder(left_image_test, right_image_test, None, args),
+    shuffle = False, drop_last=False)
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 5, 7, 9], gamma=0.5)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 7, 10, 13], gamma=0.5)
 
 flow_filenames_file = 'utils/filenames/kitti_flow_val_files_occ_200.txt'
 flow_noc_filename = flow_filenames_file.replace('occ_', '')
@@ -83,63 +85,79 @@ former_test, latter_test, flow = get_flow_data(flow_filenames_file, args.gt_path
 former_test, latter_test, noc_flow = get_flow_data(flow_noc_filename, args.gt_path)
 TestFlowLoader = torch.utils.data.DataLoader(
         myImageFolder(former_test, latter_test, flow, args, noc_flow=noc_flow),
-        batch_size = 1, shuffle = False, num_workers = 1, drop_last = False)
-
-if args.loadmodel:
-    checkpoint = torch.load(args.loadmodel)
-    net.load_state_dict(checkpoint['state_dict'])
-    teacher_net.load_state_dict(checkpoint['state_dict'])
-    epoch = checkpoint['epoch']
-    scheduler = checkpoint['scheduler']
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
+        batch_size = 1, shuffle = False, drop_last = False)
 
 if torch.cuda.device_count() >= 2:
     net = nn.DataParallel(net)
     teacher_net = nn.DataParallel(teacher_net)
 
-def gaussian_noise(x, mean=0, sigma=0.1):
-    noise = torch.normal(mean, sigma, x.shape).to(x.device)
-    gaussian_out = x + noise
-    gaussian_out = torch.clamp(gaussian_out, 0, 1)
-    return gaussian_out
-
+if args.loadmodel:
+    checkpoint = torch.load(args.loadmodel)
+    net.load_state_dict(checkpoint['state_dict'])
+    teacher_net.load_state_dict(checkpoint['state_dict'])
+    epoch = checkpoint['epoch'] + 1
+    # scheduler = checkpoint['scheduler']
+    # optimizer.load_state_dict(checkpoint['optimizer'])
+    iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
+    
 def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
     slices = []
     for i in range(4):
         slices.append(list(range(i * args.batch_size, (i + 1) * args.batch_size)))
 
+    total_image_loss = 0
+    total_image_loss_2 = 0
+    total_disp_gradient_loss = 0
+    total_disp_gradient_loss_2 = 0
+    total_lr_loss = 0
+    total_msd_loss = 0
     total_distillation_loss = 0
     total_distillation_loss_2 = 0
+    if args.use_census_loss:
+        total_census_image_loss = 0
+        total_census_image_loss_2 = 0
+    if args.type_of_2warp > 0:
+        total_warp2loss = 0
+        total_warp2loss_2 = 0
     iter = int(epoch * len(CycleLoader.dataset) / args.batch_size) + 1
 
     net.train()
-    if not args.random_crop:
-        selfsup_transformations = get_selfsup_transformations(args, crop_size=32)
     with tqdm(total=len(dataloader.dataset)) as pbar:
-        for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2) in enumerate(dataloader):
+        for batch_idx, (left_image_1, left_image_2, right_image_1, right_image_2, data_dict) in enumerate(dataloader):
             optimizer.zero_grad()
 
-            full_former = torch.cat((left_image_2, left_image_1, right_image_1, left_image_1), 0).cuda()
-            full_latter = torch.cat((right_image_2, left_image_2, right_image_2, right_image_1), 0).cuda()
+            left_image_1, left_image_2, right_image_1, right_image_2 = left_image_1.cuda(), left_image_2.cuda(), right_image_1.cuda(), right_image_2.cuda()
+            h, w = left_image_1.size(2), left_image_1.size(3)
+            crop_x = random.randint(0, w - (args.input_width-64))
+            crop_y = random.randint(0, h - (args.input_height-64))
+            full_former = torch.cat((left_image_2, left_image_1, right_image_1, left_image_1), 0)
+            full_latter = torch.cat((right_image_2, left_image_2, right_image_2, right_image_1), 0)
 
-            if args.random_crop:
-                h, w = left_image_1.size(2), left_image_1.size(3)
-                crop_x = random.randint(0, w - (args.input_width-64))
-                crop_y = random.randint(0, h - (args.input_height-64))
-                former = crop(full_former, crop_y, crop_x, args.input_height-64, args.input_width-64)
-                latter = crop(full_latter, crop_y, crop_x, args.input_height-64, args.input_width-64)
-            else:
-                former = selfsup_transformations(full_former)
-                latter = selfsup_transformations(full_latter)
+            former = crop(full_former, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            latter = crop(full_latter, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            # left_image_1 = crop(left_image_1, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            # left_image_2 = crop(left_image_2, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            # right_image_1 = crop(right_image_1, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            # right_image_2 = crop(right_image_2, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_left_1"] = crop(data_dict["noisy_left_1"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_left_2"] = crop(data_dict["noisy_left_2"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_right_1"] = crop(data_dict["noisy_right_1"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_right_2"] = crop(data_dict["noisy_right_2"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+
+            data_dict["noisy_mask_left_1"] = crop(data_dict["noisy_mask_left_1"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_mask_left_2"] = crop(data_dict["noisy_mask_left_2"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_mask_right_1"] = crop(data_dict["noisy_mask_right_1"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            data_dict["noisy_mask_right_2"] = crop(data_dict["noisy_mask_right_2"], crop_y, crop_x, args.input_height-64, args.input_width-64)
+            noisy_former = torch.cat((data_dict["noisy_left_2"], data_dict["noisy_left_1"], data_dict["noisy_right_1"], data_dict["noisy_left_1"]), 0).cuda()
+            noisy_latter = torch.cat((data_dict["noisy_right_2"], data_dict["noisy_left_2"], data_dict["noisy_right_2"], data_dict["noisy_right_1"]), 0).cuda()
+            noisy_former_mask = torch.cat((data_dict["noisy_mask_left_2"], data_dict["noisy_mask_left_1"], data_dict["noisy_mask_right_1"], data_dict["noisy_mask_left_1"]), 0).cuda()
+            noisy_latter_mask = torch.cat((data_dict["noisy_mask_right_2"], data_dict["noisy_mask_left_2"], data_dict["noisy_mask_right_2"], data_dict["noisy_mask_right_1"]), 0).cuda()
 
             model_input = torch.cat((full_former, full_latter), 1)
             model_input_2 = torch.cat((full_latter, full_former), 1)
 
-            noise_latter = gaussian_noise((latter))
-            noise_former = gaussian_noise((former))
-            crop_model_input = torch.cat((former, noise_latter), 1)
-            crop_model_input_2 = torch.cat((latter, noise_former), 1)
+            crop_model_input = torch.cat((former, noisy_latter), 1)
+            crop_model_input_2 = torch.cat((latter, noisy_former), 1)
 
             with torch.no_grad():
                 teacher_disp_est_scale, teacher_flows = teacher_net(model_input)
@@ -153,40 +171,50 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
             fw_mask = fw.clone().detach()
             bw_mask = bw.clone().detach()
 
+
             # Distillation
-            if args.random_crop:
-                crop_teacher_disp_est_scale = crop(teacher_disp_est_scale, crop_y, crop_x, args.input_height-64, args.input_width-64)
-                crop_teacher_disp_est_scale_2 = crop(teacher_disp_est_scale_2, crop_y, crop_x, args.input_height-64, args.input_width-64)
-                crop_teacher_fw_mask = crop(fw_mask, crop_y, crop_x, args.input_height-64, args.input_width-64)
-                crop_teacher_bw_mask = crop(bw_mask, crop_y, crop_x, args.input_height-64, args.input_width-64)
-            else:
-                crop_teacher_disp_est_scale = selfsup_transformations(teacher_disp_est_scale)
-                crop_teacher_disp_est_scale_2 = selfsup_transformations(teacher_disp_est_scale_2)
-                crop_teacher_fw_mask = selfsup_transformations(fw_mask)
-                crop_teacher_bw_mask = selfsup_transformations(bw_mask)
-            distillation_loss = photo_loss_abs_robust(disp_est_scale, crop_teacher_disp_est_scale, crop_teacher_fw_mask)
-            distillation_loss_2 = photo_loss_abs_robust(disp_est_scale_2, crop_teacher_disp_est_scale_2, crop_teacher_bw_mask)
+            crop_teacher_disp_est_scale = crop(teacher_disp_est_scale, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            crop_teacher_disp_est_scale_2 = crop(teacher_disp_est_scale_2, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            crop_teacher_fw_mask = crop(fw_mask, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            crop_teacher_bw_mask = crop(bw_mask, crop_y, crop_x, args.input_height-64, args.input_width-64)
+            distillation_loss = photo_loss_abs_robust(disp_est_scale - crop_teacher_disp_est_scale, crop_teacher_fw_mask)
+            distillation_loss_2 = photo_loss_abs_robust(disp_est_scale_2 - crop_teacher_disp_est_scale_2, crop_teacher_bw_mask)
 
             loss =  args.selfsup_loss_weight * (distillation_loss + distillation_loss_2)
+
+                
             loss.backward()
             optimizer.step()
 
+            # writer.add_scalar('iter/rec_loss', image_loss.data, iter)
+            # writer.add_scalar('iter/rec_loss_2', image_loss_2.data, iter)
+            # writer.add_scalar('iter/smooth_loss', disp_gradient_loss.data, iter)
+            # writer.add_scalar('iter/smooth_loss_2', disp_gradient_loss_2.data, iter)
+            # writer.add_scalar('iter/lr_consistency', lr_loss.data, iter)
+            # writer.add_scalar('iter/msd_loss', msd_loss.data, iter)
             # writer.add_scalar('iter/distillation', distillation_loss.data, iter)
             # writer.add_scalar('iter/distillation_2', distillation_loss_2.data, iter)
+            # if args.use_census_loss:
+            #     writer.add_scalar('iter/census_loss', census_image_loss.data, iter)
+            #     writer.add_scalar('iter/census_loss_2', census_image_loss_2.data, iter)
+            # if args.type_of_2warp > 0:
+            #     writer.add_scalar('iter/warp2loss', warp2loss.data, iter)
+            #     writer.add_scalar('iter/warp2loss_2', warp2loss_2.data, iter)
 
+          
             total_distillation_loss += float(distillation_loss)
             total_distillation_loss_2 += float(distillation_loss_2)
+         
+            if iter % 1000 == 0:
+                writer.add_images('fw_mask', fw_mask, iter)
+                writer.add_images('bw_mask', bw_mask, iter)
+                writer.add_images('noisy_former', noisy_former, iter)
+                writer.add_images('noisy_latter', noisy_latter, iter)
 
-            # if iter % 100 == 0:
-            #     writer.add_images('fw_mask', fw_mask, iter)
-            #     writer.add_images('bw_mask', bw_mask, iter)
-            #     writer.add_images('left_rgb', left_image_1, iter)
-            #     writer.add_images('right_rgb', right_image_1, iter)
-
-            # if (iter + 1) % 600 == 0:
+            # if (iter + 1) % 10000 == 0:
             #     # state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-            #     state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
-            #     torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter))
+            #     state = {'iter': iter, 'epoch': epoch, 'state_dict': net.state_dict()}
+            #     torch.save(state, "savemodel/" + args.exp_name + "/model_iter" + str(iter+1))
             #     print("The model of iter ", iter, "has been saved.")
 
             iter += 1
@@ -197,11 +225,23 @@ def train(epoch, dataloader, net, optimizer, scheduler, writer, args):
 
     # scheduler.step()
 
+    writer.add_scalar('epoch/rec_loss', total_image_loss / len(CycleLoader.dataset), epoch)
+    writer.add_scalar('epoch/rec_loss_2', total_image_loss_2 / len(CycleLoader.dataset), epoch)
+    writer.add_scalar('epoch/smooth_loss', total_disp_gradient_loss / len(CycleLoader.dataset), epoch)
+    writer.add_scalar('epoch/smooth_loss_2', total_disp_gradient_loss_2 / len(CycleLoader.dataset), epoch)
+    writer.add_scalar('epoch/lr_consistency', total_lr_loss / len(CycleLoader.dataset), epoch)
+    writer.add_scalar('epoch/msd_loss', total_msd_loss / len(CycleLoader.dataset), epoch)
     writer.add_scalar('epoch/distillation_loss', total_distillation_loss / len(CycleLoader.dataset), epoch)
     writer.add_scalar('epoch/distillation_loss_2', total_distillation_loss_2 / len(CycleLoader.dataset), epoch)
+    if args.use_census_loss:
+        writer.add_scalar('epoch/census_loss', total_census_image_loss / len(CycleLoader.dataset), epoch)
+        writer.add_scalar('epoch/census_loss_2', total_census_image_loss_2 / len(CycleLoader.dataset), epoch)
+    if args.type_of_2warp > 0:
+        writer.add_scalar('epoch/warp2loss', total_warp2loss / len(CycleLoader.dataset), epoch)
+        writer.add_scalar('epoch/warp2loss_2', total_warp2loss_2 / len(CycleLoader.dataset), epoch)
 
-    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
+    # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
+    state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
     torch.save(state, "savemodel/" + args.exp_name + "/model_epoch" + str(epoch))
     print("The model of epoch ", epoch, "has been saved.")
 
@@ -331,14 +371,9 @@ for epoch in range(start_epoch, args.num_epochs):
         stereo_err = test_stereo(TestImageLoader, net, gt_disparities, writer, epoch)
         flow_err = test_flow(TestFlowLoader, net, writer, epoch)
     if stereo_err < best_stereo_metric:
-        best_stereo_metric = stereo_err
-        str_err = "{:.4f}".format(stereo_err)
-        # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-        state = {'epoch': epoch, 'state_dict': net.state_dict()}
+        state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
         torch.save(state, "savemodel/" + args.exp_name + "/stereo_best")
     if flow_err < best_flow_metric:
-        best_flow_metric = flow_err
-        str_err = "{:.4f}".format(flow_err)
         # state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler}
-        state = {'epoch': epoch, 'state_dict': net.state_dict()}
+        state = {'epoch': epoch, 'state_dict': net.state_dict(), 'optimizer': optimizer.state_dict()}
         torch.save(state, "savemodel/" + args.exp_name + "/flow_best")
